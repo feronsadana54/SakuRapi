@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      LaunchTheme: shown while the Flutter engine is starting.
+      Uses a dark (NoTitleBar) parent so the white status-bar icons are
+      legible over the blue branded splash background.
+    -->
+    <style name="LaunchTheme" parent="@android:style/Theme.Black.NoTitleBar">
+        <item name="android:windowBackground">@drawable/launch_background</item>
+    </style>
+
+    <!--
+      NormalTheme: applied once Flutter has drawn its first frame.
+      The Flutter engine then takes full control of the window.
+    -->
+    <style name="NormalTheme" parent="@android:style/Theme.Black.NoTitleBar">
+        <item name="android:windowBackground">?android:colorBackground</item>
+    </style>
+</resources>

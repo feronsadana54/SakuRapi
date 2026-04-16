@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160">
+  <!-- Wallet body -->
+  <rect x="16" y="52" width="128" height="88" rx="14" fill="#1565C0"/>
+  <!-- Wallet top flap / fold -->
+  <rect x="16" y="44" width="128" height="30" rx="12" fill="#003C8F"/>
+  <!-- Subtle inner line -->
+  <rect x="16" y="66" width="128" height="5" fill="#FFFFFF" fill-opacity="0.08"/>
+  <!-- Coin pocket circle (shadow) -->
+  <circle cx="118" cy="104" r="22" fill="#000000" fill-opacity="0.18"/>
+  <!-- Coin -->
+  <circle cx="118" cy="104" r="18" fill="#FFB300"/>
+  <!-- Coin highlight -->
+  <circle cx="113" cy="99" r="5" fill="#FFD54F" fill-opacity="0.55"/>
+  <!-- Rp text on coin -->
+  <text x="118" y="110" text-anchor="middle" font-size="12" font-family="Arial,sans-serif" font-weight="bold" fill="#FFFFFF">Rp</text>
+  <!-- Card detail lines -->
+  <rect x="28" y="80" width="68" height="7" rx="3" fill="#FFFFFF" fill-opacity="0.38"/>
+  <rect x="28" y="96" width="44" height="5" rx="2" fill="#FFFFFF" fill-opacity="0.22"/>
+  <!-- Floating small coin top-right -->
+  <circle cx="148" cy="28" r="10" fill="#FFD54F" fill-opacity="0.80"/>
+  <circle cx="145" cy="25" r="3" fill="#FFE082" fill-opacity="0.60"/>
+  <!-- Floating small coin bottom-left -->
+  <circle cx="20" cy="150" r="7" fill="#FFD54F" fill-opacity="0.65"/>
+  <!-- Floating dot accent -->
+  <circle cx="148" cy="148" r="4" fill="#E3F2FD" fill-opacity="0.70"/>
+  <circle cx="12" cy="56" r="3" fill="#E3F2FD" fill-opacity="0.50"/>
+</svg>

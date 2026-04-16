@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Finance-themed wallet icon — foreground layer for the adaptive launcher icon.
+  Canvas: 108 × 108 dp.  Safe zone (always visible): inner 72 × 72 dp circle.
+  Background colour (#1565C0) is supplied by the adaptive-icon <background> layer.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- ── Wallet body (white rounded rectangle) ── -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M28,34 H80 C84.4,34 88,37.6 88,42 V72 C88,76.4 84.4,80 80,80 H28 C23.6,80 20,76.4 20,72 V42 C20,37.6 23.6,34 28,34 Z"/>
+
+    <!-- ── Coin pocket cut-out (same blue as background → looks like a recess) ── -->
+    <path
+        android:fillColor="#1565C0"
+        android:pathData="M62,50 H80 C84.4,50 88,53.6 88,58 V58 C88,62.4 84.4,66 80,66 H62 V50 Z"/>
+
+    <!-- ── Coin inside pocket (white circle) ── -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M69,51 a7,7 0,1,0 14,0 a7,7 0,1,0 -14,0 Z"/>
+
+    <!-- ── Rupiah symbol on coin (simplified R-stroke in blue) ── -->
+    <path
+        android:strokeColor="#1565C0"
+        android:strokeWidth="1.6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000"
+        android:pathData="M74,47.5 L74,54.5 M74,48 C74,48 77.2,48 77.2,49.75 C77.2,51.5 74,51.5 74,51.5 M75.5,51.5 L77.8,54.5"/>
+
+    <!-- ── Card lines on wallet body (decorative) ── -->
+    <path
+        android:strokeColor="#BBDEFB"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M28,60 L55,60"/>
+    <path
+        android:strokeColor="#BBDEFB"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M28,68 L47,68"/>
+</vector>

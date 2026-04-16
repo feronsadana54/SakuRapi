@@ -10,12 +10,24 @@ import '../database/app_database.dart';
 import '../database/daos/category_dao.dart';
 import '../database/daos/transaction_dao.dart';
 
+/// Implementasi konkret [ITransactionRepository] berbasis Drift SQLite.
+///
+/// Alur data (baca):
+///   Provider UI mengawasi repo ini → DAO memancarkan stream query Drift →
+///   [_mapRows] memetakan category_id setiap baris ke [Category] lengkap →
+///   entitas domain [Transaction] dikembalikan.
+///
+/// Alur data (tulis):
+///   UI memanggil insert/update/delete → DAO menulis ke tabel `transactions` →
+///   Drift menginvalidasi stream query → [watchAll] memancar ulang → UI di-rebuild.
 class TransactionRepositoryImpl implements ITransactionRepository {
   final TransactionDao _txDao;
   final CategoryDao _catDao;
 
   TransactionRepositoryImpl(this._txDao, this._catDao);
 
+  /// Stream reaktif seluruh transaksi, diurutkan dari terbaru.
+  /// Drift secara otomatis memancar ulang setiap kali tabel `transactions` berubah.
   @override
   Stream<List<Transaction>> watchAll() => _txDao.watchAll().asyncMap(_mapRows);
 
@@ -74,6 +86,11 @@ class TransactionRepositoryImpl implements ITransactionRepository {
 
   // ── Mappers ──────────────────────────────────────────────────────────
 
+  /// Mengubah daftar baris Drift mentah menjadi entitas domain [Transaction].
+  ///
+  /// Mengambil semua kategori sekali per batch (1 panggilan DB tanpa peduli
+  /// jumlah baris) dan membangun map id→Category untuk pencarian O(1).
+  /// Baris yang category_id-nya tidak ada lagi difilter secara diam-diam (orphan guard).
   Future<List<Transaction>> _mapRows(List<TransactionData> rows) async {
     if (rows.isEmpty) return [];
     final catRows = await _catDao.getAll();

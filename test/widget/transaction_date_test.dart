@@ -6,6 +6,13 @@
 //    when the screen is opened in edit mode pre-populated with that date.
 //  - The lastDate for the picker is in the year 2100 (no practical upper limit).
 //
+// Database strategy:
+//  TransactionFormScreen watches categoriesForTypeProvider → categoryRepositoryProvider.
+//  To prevent Drift from creating multiple AppDatabase instances across test runs
+//  (which triggers a "DriftRemoteException: database is already open" warning),
+//  we override categoryRepositoryProvider with a lightweight in-memory fake that
+//  returns a static list of stub categories.  No real SQLite file is touched.
+//
 // Run: flutter test test/widget/transaction_date_test.dart
 
 import 'package:flutter/material.dart';
@@ -19,8 +26,39 @@ import 'package:finance_tracker/domain/entities/category_entity.dart';
 import 'package:finance_tracker/domain/entities/transaction_entity.dart';
 import 'package:finance_tracker/domain/enums/category_type.dart';
 import 'package:finance_tracker/domain/enums/transaction_type.dart';
+import 'package:finance_tracker/domain/repositories/i_category_repository.dart';
 import 'package:finance_tracker/presentation/features/transactions/transaction_form_screen.dart';
 import 'package:finance_tracker/presentation/providers/database_provider.dart';
+
+// ── Fake category repository ──────────────────────────────────────────────────
+
+/// Returns a single stub expense category.
+/// Used so TransactionFormScreen can render the category grid without needing
+/// a real database.  No Drift AppDatabase is created.
+class _FakeCategoryRepo implements ICategoryRepository {
+  static final _cats = [
+    const Category(
+      id: 'cat-test-001',
+      name: 'Test Kategori',
+      iconCode: 0xe5d3,
+      colorValue: 0xFF546E7A,
+      type: CategoryType.expense,
+      isDefault: false,
+    ),
+  ];
+
+  @override
+  Stream<List<Category>> watchAll() => Stream.value(_cats);
+
+  @override
+  Future<List<Category>> getAll() async => _cats;
+
+  @override
+  Future<void> insert(Category category) async {}
+
+  @override
+  Future<void> delete(String id) async {}
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -46,6 +84,9 @@ Transaction _txWithDate(DateTime date) => Transaction(
     );
 
 /// Pumps [TransactionFormScreen] in edit mode with a pre-populated transaction.
+///
+/// Overrides [categoryRepositoryProvider] with [_FakeCategoryRepo] so no real
+/// AppDatabase is created — prevents the Drift "multiple instances" warning.
 Future<void> _pumpForm(
   WidgetTester tester,
   Transaction tx,
@@ -55,6 +96,10 @@ Future<void> _pumpForm(
     ProviderScope(
       overrides: [
         sharedPreferencesProvider.overrideWithValue(prefs),
+        // Replace the DB-backed category repo with a lightweight fake.
+        // TransactionFormScreen only reads categories for the picker; no write
+        // operations are triggered during these render-only tests.
+        categoryRepositoryProvider.overrideWithValue(_FakeCategoryRepo()),
       ],
       child: MaterialApp(
         localizationsDelegates: const [

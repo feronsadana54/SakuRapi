@@ -7,9 +7,21 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_strings.dart';
+import '../../../presentation/providers/auth_provider.dart';
 import '../../../presentation/providers/database_provider.dart';
 import '../../../router/app_router.dart';
 
+/// Layar pertama yang ditampilkan setiap kali aplikasi dibuka.
+///
+/// Menampilkan logo + nama aplikasi selama 1,6 detik, lalu memutuskan navigasi:
+///
+///   1. [SettingsRepository.isOnboardingComplete] == false  → /onboarding
+///   2. [AuthService.getCurrentUser] == null               → /login
+///   3. pengguna sudah login                               → /home
+///   4. exception atau timeout apapun                      → /home (fail-safe)
+///
+/// Semua operasi I/O dibungkus timeout 3 detik agar repository yang bermasalah
+/// tidak membuat pengguna terjebak di splash selamanya.
 class SplashScreen extends ConsumerStatefulWidget {
   const SplashScreen({super.key});
 
@@ -23,8 +35,6 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
   late final Animation<double> _fadeAnim;
   late final Animation<double> _scaleAnim;
 
-  // Cancellable timer — always cancelled in dispose() so the splash can
-  // never hang regardless of what happens to the widget tree.
   Timer? _navTimer;
 
   static const _splashDelay = Duration(milliseconds: 1600);
@@ -44,33 +54,43 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
     );
 
     _controller.forward();
-
-    // Use an explicit Timer so it can be cancelled in dispose().
     _navTimer = Timer(_splashDelay, _navigate);
   }
 
   Future<void> _navigate() async {
-    // Widget may have been disposed while the timer was pending.
     if (!mounted) return;
 
-    bool isComplete = false;
+    bool onboardingComplete = false;
+    bool isLoggedIn = false;
+
     try {
       final repo = ref.read(settingsRepositoryProvider);
-      // Hard timeout: if SharedPreferences stalls for any reason, fall through.
-      isComplete = await repo
+      onboardingComplete = await repo
           .isOnboardingComplete()
           .timeout(const Duration(seconds: 3));
+
+      if (onboardingComplete) {
+        final authService = ref.read(authServiceProvider);
+        final user = await authService
+            .getCurrentUser()
+            .timeout(const Duration(seconds: 3));
+        isLoggedIn = user != null;
+      }
     } catch (_) {
-      // Any error / timeout → treat as onboarding complete so the user
-      // always lands on the home screen and is never stuck on splash.
-      isComplete = true;
+      // On error/timeout → go to home to avoid being stuck
+      onboardingComplete = true;
+      isLoggedIn = true;
     }
 
-    // Check again after the async gap.
     if (!mounted) return;
 
-    // context.go is synchronous once the router is ready; use it directly.
-    context.go(isComplete ? AppRoutes.home : AppRoutes.onboarding);
+    if (!onboardingComplete) {
+      context.go(AppRoutes.onboarding);
+    } else if (!isLoggedIn) {
+      context.go(AppRoutes.login);
+    } else {
+      context.go(AppRoutes.home);
+    }
   }
 
   @override
@@ -92,7 +112,6 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // App icon container — white card with the SVG logo inside.
                 Container(
                   width: 100,
                   height: 100,

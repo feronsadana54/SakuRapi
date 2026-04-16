@@ -56,3 +56,5 @@ android/key.properties
 # Flutter generated
 flutter_export_environment.sh
 .flutter-plugins
+
+docs\DEVELOPMENT_TO_DEPLOY.md

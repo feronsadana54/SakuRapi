@@ -8,8 +8,14 @@ import 'settings_provider.dart';
 
 // ── Base fetch provider ───────────────────────────────────────────────────────
 
-/// Fetches and aggregates transactions for a date range.
-/// Family parameter is a Dart 3 record — structural equality by default.
+/// Provider laporan dasar yang mengambil dan mengagregasi transaksi untuk rentang tanggal apapun.
+///
+/// Menggunakan Dart 3 record `(DateTime start, DateTime end)` sebagai family key —
+/// record memiliki kesetaraan struktural, sehingga dua provider dengan rentang yang sama
+/// berbagi hasil cache yang sama tanpa class [Equatable] khusus.
+///
+/// Dipanggil oleh semua provider laporan turunan (harian, bulanan, tahunan, rentang,
+/// siklus gaji). Tidak dipanggil langsung oleh layar UI.
 final reportSummaryProvider =
     FutureProvider.family<SummaryResult, (DateTime, DateTime)>(
   (ref, range) async {
@@ -33,7 +39,8 @@ final selectedYearProvider = StateProvider<int>(
   (ref) => DateTime.now().year,
 );
 
-/// Null means no range selected yet.
+/// Null berarti pengguna belum memilih rentang tanggal di tab Rentang.
+/// [rangeReportProvider] mengembalikan null saat ini null.
 final selectedRangeProvider = StateProvider<DateTimeRange?>((_) => null);
 
 // ── Derived report providers ──────────────────────────────────────────────────
@@ -80,6 +87,17 @@ final rangeReportProvider = Provider<AsyncValue<SummaryResult>?>((ref) {
   );
 });
 
+/// Menghitung ringkasan siklus gajian beserta tanggal mulai/akhirnya.
+///
+/// Logika siklus gajian (ditangani oleh [AppDateUtils.getPaydayCycle]):
+///   - Membaca paydayDate dari settings (default 25).
+///   - "Siklus saat ini" = dari tanggal gajian terakhir yang sudah lewat
+///     hingga (tidak termasuk) tanggal gajian berikutnya.
+///   - Contoh dengan paydayDate=25 pada 2026-04-16:
+///       mulai siklus = 2026-03-25, akhir siklus = 2026-04-24.
+///
+/// Mengembalikan `(SummaryResult, startDate, endDate)` agar UI dapat menampilkan
+/// baik total maupun label rentang tanggal siklus.
 final paydayCycleReportProvider =
     Provider<AsyncValue<(SummaryResult, DateTime, DateTime)>>((ref) {
   final settingsAsync = ref.watch(settingsProvider);

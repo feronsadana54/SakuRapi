@@ -6,12 +6,26 @@ import 'database_provider.dart';
 
 // ── Reactive stream of all transactions ───────────────────────────────────────
 
+/// Mengekspos seluruh riwayat transaksi sebagai [Stream] reaktif.
+///
+/// Didukung oleh [TransactionRepositoryImpl.watchAll], yang mendelegasikan ke
+/// [TransactionDao.watchAll] — query SELECT Drift yang otomatis memancarkan ulang
+/// setiap kali tabel `transactions` berubah.
+///
+/// Diawasi oleh:
+/// - [homeSummaryProvider] — untuk kartu saldo dan ringkasan hari ini.
+/// - [TransactionListScreen] — untuk daftar transaksi yang dapat di-scroll.
+/// - [reportSummaryProvider] — melalui query rentang tanggal (tidak stream ini langsung).
 final allTransactionsProvider = StreamProvider<List<Transaction>>((ref) {
   return ref.watch(transactionRepositoryProvider).watchAll();
 });
 
 // ── Home screen aggregated summary ───────────────────────────────────────────
 
+/// Ringkasan data keuangan yang sudah dihitung sebelumnya untuk [HomeScreen].
+///
+/// Diturunkan secara sinkron dari [allTransactionsProvider] sehingga layar home
+/// tidak perlu berlangganan ke banyak provider secara terpisah.
 class HomeSummary {
   final double totalBalance;
   final double totalIncome;
@@ -39,6 +53,13 @@ class HomeSummary {
   );
 }
 
+/// Menghitung semua transaksi menjadi satu [HomeSummary] dalam satu iterasi.
+///
+/// Dihitung ulang setiap kali [allTransactionsProvider] memancarkan data baru —
+/// yang terjadi setelah setiap insert, update, atau delete via stream reaktif Drift.
+///
+/// Digunakan secara eksklusif oleh [HomeScreen]. Layar laporan menggunakan
+/// [reportSummaryProvider] dengan parameter rentang tanggal eksplisit.
 final homeSummaryProvider = Provider<AsyncValue<HomeSummary>>((ref) {
   return ref.watch(allTransactionsProvider).whenData((txs) {
     final today = AppDateUtils.dateOnly(DateTime.now());

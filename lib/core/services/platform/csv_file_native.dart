@@ -14,7 +14,7 @@ Future<void> saveAndShareCsv(String csv, String fileName) async {
 
   await Share.shareXFiles(
     [XFile(file.path, mimeType: 'text/csv')],
-    subject: 'DompetKu — Ekspor Transaksi',
+    subject: 'SakuRapi — Ekspor Transaksi',
   );
 }
 

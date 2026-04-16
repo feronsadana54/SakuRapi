@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -11,16 +12,27 @@ import 'package:timezone/timezone.dart' as tz;
 import 'app.dart';
 import 'core/services/notification_service.dart';
 import 'data/repositories/settings_repository_impl.dart';
+import 'firebase_options.dart';
 import 'presentation/providers/database_provider.dart';
 
-// Prevents the background initialisation from running more than once per
-// process lifetime (can fire again on hot-reload / hot-restart in dev).
+/// Guard agar inisialisasi background hanya berjalan sekali per lifetime proses.
 bool _bgInitDone = false;
 
+/// Titik masuk utama aplikasi SakuRapi.
+///
+/// Urutan eksekusi:
+///   1. Inisialisasi binding Flutter
+///   2. Firebase.initializeApp() — hanya jika [kFirebaseConfigured] == true
+///   3. Muat SharedPreferences (diperlukan sebelum runApp)
+///   4. Jalankan aplikasi dalam ProviderScope (Riverpod)
+///   5. Setelah frame pertama: inisialisasi timezone + jadwalkan notifikasi
+///
+/// Semua pekerjaan berat (Firebase, timezone, notifikasi) ditangani secara
+/// aman dengan timeout dan try/catch agar UI tetap responsif.
 Future<void> main() async {
   final binding = WidgetsFlutterBinding.ensureInitialized();
 
-  // Orientation: fire-and-forget, non-critical.
+  // Orientasi: fire-and-forget, tidak kritis.
   unawaited(SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
@@ -28,7 +40,7 @@ Future<void> main() async {
     DeviceOrientation.landscapeRight,
   ]));
 
-  // Transparent status bar with dark icons (overridden by Flutter after first frame).
+  // Status bar transparan dengan ikon gelap.
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
@@ -36,11 +48,22 @@ Future<void> main() async {
     ),
   );
 
-  // SharedPreferences must be ready before runApp so the provider override works.
-  // This is a fast disk read; it is safe to await here.
+  // Inisialisasi Firebase — hanya jika sudah dikonfigurasi via flutterfire CLI.
+  // Jika kFirebaseConfigured masih false, lewati dan jalankan dalam mode lokal.
+  // Lihat lib/firebase_options.dart dan docs/DEVELOPMENT_TO_DEPLOY.md §3.
+  if (kFirebaseConfigured) {
+    try {
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      ).timeout(const Duration(seconds: 10));
+    } catch (_) {
+      // Firebase gagal init — aplikasi tetap berjalan dalam mode lokal/tamu.
+    }
+  }
+
+  // SharedPreferences harus siap sebelum runApp agar override provider berjalan.
   final prefs = await SharedPreferences.getInstance();
 
-  // Launch the app immediately — do NOT block for timezone or notifications.
   runApp(
     ProviderScope(
       overrides: [
@@ -50,32 +73,29 @@ Future<void> main() async {
     ),
   );
 
-  // Defer all heavy work until after the first frame.  This guarantees
-  // the UI is responsive before any potentially slow platform calls run.
-  // Notifications are not supported on web — skip entirely.
+  // Tunda inisialisasi berat ke setelah frame pertama.
+  // Notifikasi tidak didukung di web.
   if (!kIsWeb) {
     binding.addPostFrameCallback((_) => _initBackground(prefs));
   }
 }
 
-/// Timezone + notification scheduling — runs entirely after the first frame.
+/// Inisialisasi timezone + penjadwalan notifikasi setelah frame pertama.
 ///
-/// Every operation is wrapped in a timeout so a misbehaving platform plugin
-/// cannot freeze the app.  All failures are silently ignored; the app works
-/// fully without notifications.
+/// Setiap operasi dibungkus timeout agar plugin platform yang bermasalah
+/// tidak membekukan aplikasi. Semua kegagalan diabaikan; aplikasi berjalan
+/// penuh tanpa notifikasi jika inisialisasi ini gagal.
 Future<void> _initBackground(SharedPreferences prefs) async {
-  if (_bgInitDone) return; // Guard: only run once per process.
+  if (_bgInitDone) return;
   _bgInitDone = true;
 
-  // Timezone init — synchronous CPU work, kept short with a Future wrapper
-  // so it yields between microtasks and does not block the event loop.
   try {
     await Future<void>.microtask(() {
       tz.initializeTimeZones();
       tz.setLocalLocation(tz.getLocation('Asia/Jakarta'));
     });
   } catch (_) {
-    return; // Cannot schedule without a valid timezone.
+    return;
   }
 
   try {
@@ -85,7 +105,6 @@ Future<void> _initBackground(SharedPreferences prefs) async {
 
     final notificationService = NotificationService();
 
-    // 3-second timeout per platform call — well inside the 5-second ANR limit.
     await notificationService
         .initialize()
         .timeout(const Duration(seconds: 3));
@@ -98,6 +117,6 @@ Future<void> _initBackground(SharedPreferences prefs) async {
         .scheduleReminders(hour: hour, minute: minute, weekdays: days)
         .timeout(const Duration(seconds: 3));
   } catch (_) {
-    // Non-fatal: notifications unavailable this launch.
+    // Non-fatal: notifikasi tidak tersedia saat peluncuran ini.
   }
 }

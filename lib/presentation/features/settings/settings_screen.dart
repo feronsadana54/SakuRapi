@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../core/constants/app_colors.dart';
@@ -11,11 +12,14 @@ import '../../../core/responsive/responsive_container.dart';
 import '../../../core/services/export_import_service.dart';
 import '../../../core/utils/date_utils.dart';
 import '../../../domain/entities/transaction_entity.dart';
+import '../../../domain/enums/auth_mode.dart';
 import '../../../domain/enums/transaction_type.dart';
+import '../../../presentation/providers/auth_provider.dart';
 import '../../../presentation/providers/database_provider.dart';
 import '../../../presentation/providers/notification_provider.dart';
 import '../../../presentation/providers/settings_provider.dart';
 import '../../../presentation/providers/transaction_provider.dart';
+import '../../../router/app_router.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -23,6 +27,7 @@ class SettingsScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final settingsAsync = ref.watch(settingsProvider);
+    final userAsync = ref.watch(currentUserProvider);
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -35,6 +40,14 @@ class SettingsScreen extends ConsumerWidget {
             child: ListView(
               padding: EdgeInsets.all(AppSpacing.pagePadding(context)),
               children: [
+                // ── Akun ──────────────────────────────────────────────
+                _SectionHeader('Akun'),
+                _AccountCard(
+                  userAsync: userAsync,
+                  onLogout: () => _confirmLogout(context, ref),
+                ),
+                SizedBox(height: AppSpacing.cardGap(context)),
+
                 // ── Keuangan ──────────────────────────────────────────
                 _SectionHeader('Keuangan'),
                 _SettingsCard(children: [
@@ -106,6 +119,32 @@ class SettingsScreen extends ConsumerWidget {
         ),
       ),
     );
+  }
+
+  // ── Logout ────────────────────────────────────────────────────────────────
+
+  Future<void> _confirmLogout(BuildContext context, WidgetRef ref) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text(AppStrings.logoutTitle),
+        content: const Text(AppStrings.logoutConfirm),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text(AppStrings.cancel),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: AppColors.expense),
+            child: const Text(AppStrings.logout),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+    await ref.read(currentUserProvider.notifier).signOut();
+    if (context.mounted) context.go(AppRoutes.login);
   }
 
   // ── Export ────────────────────────────────────────────────────────────────
@@ -222,7 +261,7 @@ class SettingsScreen extends ConsumerWidget {
     }
   }
 
-  /// Parses "15 Apr 2026" (DompetKu export format) to DateTime.
+  /// Parses "15 Apr 2026" (SakuRapi export format) to DateTime.
   DateTime _parseDate(String s) {
     const months = {
       'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4,
@@ -239,6 +278,108 @@ class SettingsScreen extends ConsumerWidget {
       }
     }
     return DateTime.now();
+  }
+}
+
+// ── Account card ─────────────────────────────────────────────────────────────
+
+class _AccountCard extends StatelessWidget {
+  final AsyncValue<dynamic> userAsync;
+  final VoidCallback onLogout;
+
+  const _AccountCard({required this.userAsync, required this.onLogout});
+
+  @override
+  Widget build(BuildContext context) {
+    return userAsync.when(
+      loading: () => const _SettingsCard(children: [
+        ListTile(
+          leading: CircleAvatar(
+            backgroundColor: AppColors.surfaceVariant,
+            child: Icon(Icons.person_outline_rounded, color: AppColors.textSecondary),
+          ),
+          title: Text('Memuat...'),
+        ),
+      ]),
+      error: (e, st) => const SizedBox.shrink(),
+      data: (user) {
+        if (user == null) return const SizedBox.shrink();
+        final isGuest = user.authMode == AuthMode.guest;
+        final authIcon = isGuest ? Icons.person_outline_rounded : Icons.g_mobiledata_rounded;
+        final authLabel = isGuest ? AppStrings.loginAsGuest : 'Google';
+        final authColor = isGuest ? AppColors.textSecondary : AppColors.primary;
+        final syncText = isGuest ? AppStrings.dataLocalOnly : AppStrings.dataBackedUp;
+        final syncIcon = isGuest ? Icons.phone_android_rounded : Icons.cloud_done_rounded;
+        final syncColor = isGuest ? AppColors.textSecondary : AppColors.income;
+
+        return _SettingsCard(children: [
+          ListTile(
+            leading: CircleAvatar(
+              backgroundColor: isGuest ? AppColors.surfaceVariant : AppColors.primaryLight,
+              child: Icon(
+                authIcon,
+                color: authColor,
+              ),
+            ),
+            title: Text(
+              user.displayName,
+              style: TextStyle(
+                fontSize: AppTypeScale.bodyText(context),
+                fontWeight: FontWeight.w600,
+                color: AppColors.textPrimary,
+              ),
+            ),
+            subtitle: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SizedBox(height: 2),
+                Row(
+                  children: [
+                    Icon(authIcon, size: 13, color: authColor),
+                    const SizedBox(width: 4),
+                    Text(
+                      authLabel,
+                      style: TextStyle(
+                        fontSize: AppTypeScale.caption(context),
+                        color: authColor,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 2),
+                Row(
+                  children: [
+                    Icon(syncIcon, size: 13, color: syncColor),
+                    const SizedBox(width: 4),
+                    Text(
+                      syncText,
+                      style: TextStyle(
+                        fontSize: AppTypeScale.caption(context),
+                        color: syncColor,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            isThreeLine: true,
+          ),
+          const Divider(height: 1, indent: 16, endIndent: 16),
+          ListTile(
+            leading: const Icon(Icons.logout_rounded, color: AppColors.expense),
+            title: Text(
+              AppStrings.logout,
+              style: TextStyle(
+                fontSize: AppTypeScale.bodyText(context),
+                color: AppColors.expense,
+              ),
+            ),
+            onTap: onLogout,
+          ),
+        ]);
+      },
+    );
   }
 }
 

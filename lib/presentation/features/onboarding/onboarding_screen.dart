@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_strings.dart';
@@ -12,6 +13,16 @@ import '../../../core/responsive/responsive_container.dart';
 import '../../../presentation/providers/database_provider.dart';
 import '../../../router/app_router.dart';
 
+/// Layar onboarding yang ditampilkan sekali saat pertama kali aplikasi dibuka.
+///
+/// Terdiri dari 4 halaman:
+///   Halaman 1 — Selamat datang / pengenalan aplikasi
+///   Halaman 2 — Penjelasan fitur transaksi
+///   Halaman 3 — Penjelasan laporan + permintaan izin notifikasi
+///   Halaman 4 — Pengaturan tanggal gajian + tombol "Mulai"
+///
+/// Saat selesai ([_finish]), onboarding_complete disimpan ke SharedPreferences
+/// dan navigasi berlanjut ke /login.
 class OnboardingScreen extends ConsumerStatefulWidget {
   const OnboardingScreen({super.key});
 
@@ -22,10 +33,12 @@ class OnboardingScreen extends ConsumerStatefulWidget {
 class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   final _pageController = PageController();
   int _currentPage = 0;
+  // Nilai default 25 — hari ke-25 setiap bulan, bisa diubah pengguna.
   final _paydayController = TextEditingController(text: '25');
   String? _paydayError;
+  bool _notifPermissionGranted = false;
 
-  static const int _totalPages = 3;
+  static const int _totalPages = 4;
 
   @override
   void dispose() {
@@ -52,8 +65,14 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     }
   }
 
+  /// Dipanggil saat pengguna mengetuk "Mulai" di halaman terakhir onboarding.
+  ///
+  /// Alur:
+  ///   1. Validasi input tanggal gajian (1–31)
+  ///   2. Simpan tanggal gajian ke SharedPreferences
+  ///   3. Tandai onboarding selesai di SharedPreferences
+  ///   4. Navigasi ke /login
   Future<void> _finish() async {
-    // Validate payday input on the last page
     final input = _paydayController.text.trim();
     final parsed = int.tryParse(input);
     if (parsed == null || parsed < 1 || parsed > 31) {
@@ -66,10 +85,12 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     await repo.setOnboardingComplete(true);
 
     if (!mounted) return;
-    context.go(AppRoutes.home);
+    context.go(AppRoutes.login);
   }
 
   bool get _isLastPage => _currentPage == _totalPages - 1;
+  // Indeks halaman 2 adalah halaman izin notifikasi
+  bool get _isNotifPage => _currentPage == 2;
 
   @override
   Widget build(BuildContext context) {
@@ -92,7 +113,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                       final router = GoRouter.of(context);
                       await repo.setOnboardingComplete(true);
                       if (!mounted) return;
-                      router.go(AppRoutes.home);
+                      router.go(AppRoutes.login);
                     },
                     child: Text(
                       AppStrings.skip,
@@ -121,6 +142,18 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                       title: AppStrings.onboardingTitle2,
                       description: AppStrings.onboardingDesc2,
                     ),
+                    _NotificationPermissionPage(
+                      permissionGranted: _notifPermissionGranted,
+                      onRequestPermission: () async {
+                        final status = await Permission.notification.request();
+                        if (mounted) {
+                          setState(() {
+                            _notifPermissionGranted = status.isGranted;
+                          });
+                        }
+                      },
+                      onSkip: _next,
+                    ),
                     _PaydayPage(
                       controller: _paydayController,
                       errorText: _paydayError,
@@ -133,20 +166,66 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
               ),
 
               // ── Dots indicator ───────────────────────────────────────
-              _PageIndicator(
-                  total: _totalPages, current: _currentPage),
+              _PageIndicator(total: _totalPages, current: _currentPage),
               SizedBox(height: AppSpacing.cardGap(context)),
 
               // ── Action button ────────────────────────────────────────
-              Padding(
-                padding: EdgeInsets.fromLTRB(padding, 0, padding, padding),
-                child: ElevatedButton(
-                  onPressed: _next,
-                  child: Text(
-                    _isLastPage ? AppStrings.done : AppStrings.next,
+              // On notification page show two buttons; on other pages show one
+              if (_isNotifPage)
+                Padding(
+                  padding: EdgeInsets.fromLTRB(padding, 0, padding, padding),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      ElevatedButton.icon(
+                        icon: const Icon(Icons.notifications_active_rounded),
+                        label: Text(
+                          _notifPermissionGranted
+                              ? 'Izin Diberikan'
+                              : AppStrings.notifPermButton,
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: _notifPermissionGranted
+                              ? AppColors.income
+                              : AppColors.primary,
+                        ),
+                        onPressed: _notifPermissionGranted
+                            ? null
+                            : () async {
+                                final status =
+                                    await Permission.notification.request();
+                                if (mounted) {
+                                  setState(() {
+                                    _notifPermissionGranted = status.isGranted;
+                                  });
+                                  if (status.isGranted) _next();
+                                }
+                              },
+                      ),
+                      const SizedBox(height: 8),
+                      TextButton(
+                        onPressed: _next,
+                        child: Text(
+                          AppStrings.notifPermSkip,
+                          style: TextStyle(
+                            fontSize: AppTypeScale.bodyText(context),
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              else
+                Padding(
+                  padding: EdgeInsets.fromLTRB(padding, 0, padding, padding),
+                  child: ElevatedButton(
+                    onPressed: _next,
+                    child: Text(
+                      _isLastPage ? AppStrings.done : AppStrings.next,
+                    ),
                   ),
                 ),
-              ),
             ],
           ),
         ),
@@ -178,7 +257,6 @@ class _OnboardingPage extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          // SVG illustration
           SvgPicture.asset(
             svgAsset,
             width: illustrationSize,
@@ -207,6 +285,139 @@ class _OnboardingPage extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+// ── Notification permission page ──────────────────────────────────────────────
+
+class _NotificationPermissionPage extends StatelessWidget {
+  final bool permissionGranted;
+  final VoidCallback onRequestPermission;
+  final VoidCallback onSkip;
+
+  const _NotificationPermissionPage({
+    required this.permissionGranted,
+    required this.onRequestPermission,
+    required this.onSkip,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final padding = AppSpacing.pagePadding(context);
+    final illustrationSize = context.isSmall ? 140.0 : 180.0;
+
+    return Padding(
+      padding: EdgeInsets.symmetric(horizontal: padding),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          // Icon illustration
+          Container(
+            width: illustrationSize,
+            height: illustrationSize,
+            decoration: BoxDecoration(
+              color: AppColors.primaryContainer,
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              permissionGranted
+                  ? Icons.notifications_active_rounded
+                  : Icons.notifications_outlined,
+              size: illustrationSize * 0.45,
+              color: AppColors.primary,
+            ),
+          ),
+          SizedBox(height: AppSpacing.lg),
+          Text(
+            AppStrings.notifPermTitle,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: AppTypeScale.heading(context),
+              fontWeight: FontWeight.w700,
+              color: AppColors.textPrimary,
+            ),
+          ),
+          SizedBox(height: AppSpacing.sm),
+          Text(
+            AppStrings.notifPermDesc,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: AppTypeScale.bodyText(context),
+              color: AppColors.textSecondary,
+              height: 1.55,
+            ),
+          ),
+          SizedBox(height: AppSpacing.lg),
+
+          // Feature highlights
+          _FeatureRow(
+            icon: Icons.access_time_rounded,
+            text: 'Pengingat harian pukul 21:00',
+          ),
+          SizedBox(height: AppSpacing.xs),
+          _FeatureRow(
+            icon: Icons.tune_rounded,
+            text: 'Bisa diatur hari dan jamnya',
+          ),
+          SizedBox(height: AppSpacing.xs),
+          _FeatureRow(
+            icon: Icons.block_rounded,
+            text: 'Bisa dinonaktifkan kapan saja',
+          ),
+
+          if (permissionGranted) ...[
+            SizedBox(height: AppSpacing.lg),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.incomeLight,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.check_circle_rounded,
+                      color: AppColors.income, size: 20),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Izin notifikasi diberikan!',
+                    style: TextStyle(
+                      color: AppColors.income,
+                      fontWeight: FontWeight.w600,
+                      fontSize: AppTypeScale.bodyText(context),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _FeatureRow extends StatelessWidget {
+  final IconData icon;
+  final String text;
+
+  const _FeatureRow({required this.icon, required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, size: 18, color: AppColors.primary),
+        const SizedBox(width: 10),
+        Text(
+          text,
+          style: TextStyle(
+            fontSize: AppTypeScale.bodyText(context),
+            color: AppColors.textSecondary,
+          ),
+        ),
+      ],
     );
   }
 }

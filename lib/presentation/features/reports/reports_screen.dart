@@ -3,8 +3,10 @@ import 'package:flutter/material.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_strings.dart';
 import 'tabs/daily_report_tab.dart';
+import 'tabs/hutang_report_tab.dart';
 import 'tabs/monthly_report_tab.dart';
 import 'tabs/payday_report_tab.dart';
+import 'tabs/piutang_report_tab.dart';
 import 'tabs/range_report_tab.dart';
 import 'tabs/yearly_report_tab.dart';
 
@@ -17,6 +19,8 @@ class ReportsScreen extends StatelessWidget {
     AppStrings.yearly,
     AppStrings.dateRange,
     AppStrings.paydayCycle,
+    AppStrings.hutang,
+    AppStrings.piutang,
   ];
 
   @override
@@ -51,6 +55,8 @@ class ReportsScreen extends StatelessWidget {
             YearlyReportTab(),
             RangeReportTab(),
             PaydayReportTab(),
+            HutangReportTab(),
+            PiutangReportTab(),
           ],
         ),
       ),

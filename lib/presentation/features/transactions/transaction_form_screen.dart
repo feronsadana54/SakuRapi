@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_strings.dart';
+import '../../../core/constants/system_categories.dart';
 import '../../../core/responsive/app_spacing.dart';
 import '../../../core/responsive/app_type_scale.dart';
 import '../../../core/responsive/responsive_container.dart';
@@ -11,15 +13,29 @@ import '../../../core/utils/currency_formatter.dart';
 import '../../../core/utils/date_utils.dart';
 import '../../../core/widgets/app_loading_indicator.dart';
 import '../../../domain/entities/category_entity.dart';
+import '../../../domain/entities/hutang_entity.dart';
 import '../../../domain/entities/transaction_entity.dart';
 import '../../../domain/enums/transaction_type.dart';
 import '../../../presentation/providers/category_provider.dart';
 import '../../../presentation/providers/database_provider.dart';
+import '../../../presentation/providers/hutang_provider.dart';
 import '../../../presentation/widgets/category_grid_picker.dart';
-import 'package:uuid/uuid.dart';
 
+/// Form tambah / edit transaksi.
+///
+/// Fitur integrasi Hutang:
+///   Jika kategori yang dipilih adalah "Pembayaran Hutang" ([SystemCategories.pembayaranHutang]):
+///     1. Tampilkan dropdown untuk memilih hutang aktif.
+///     2. Validasi: jumlah tidak boleh melebihi sisa hutang.
+///     3. Saat simpan: buat transaksi pengeluaran + panggil
+///        [HutangNotifier.updateAfterPayment] untuk memperbarui sisa hutang.
+///
+/// Alur data saat menyimpan pembayaran hutang:
+///   Form → insert Transaction (expense) ke DB
+///       → HutangNotifier.updateAfterPayment() → update sisa + riwayat hutang
+///       → allTransactionsProvider reaktif → saldo + laporan terupdate otomatis
 class TransactionFormScreen extends ConsumerStatefulWidget {
-  /// Null → add mode. Non-null → edit mode.
+  /// Null = mode tambah. Non-null = mode edit.
   final Transaction? editTransaction;
 
   const TransactionFormScreen({this.editTransaction, super.key});
@@ -40,7 +56,15 @@ class _TransactionFormScreenState
   late DateTime _selectedDate;
   bool _isSaving = false;
 
+  // ── State integrasi hutang ─────────────────────────────────────────────────
+  // Hanya relevan saat kategori "Pembayaran Hutang" dipilih.
+  HutangEntity? _selectedHutang;
+
   bool get _isEditing => widget.editTransaction != null;
+
+  /// Apakah kategori yang dipilih adalah "Pembayaran Hutang" (sistem).
+  bool get _isPembayaranHutang =>
+      _selectedCategory?.id == SystemCategories.pembayaranHutangId;
 
   @override
   void initState() {
@@ -62,28 +86,42 @@ class _TransactionFormScreenState
     super.dispose();
   }
 
-  // ── Validation ──────────────────────────────────────────────────────────
+  // ── Validasi ──────────────────────────────────────────────────────────────
 
   String? _validateAmount(String? v) {
     if (v == null || v.trim().isEmpty) return AppStrings.amountRequired;
     final parsed = double.tryParse(v.replaceAll(RegExp(r'[^0-9]'), ''));
     if (parsed == null || parsed <= 0) return AppStrings.amountInvalid;
+
+    // Saat membayar hutang, jumlah tidak boleh melebihi sisa hutang
+    if (_isPembayaranHutang && _selectedHutang != null) {
+      if (parsed > _selectedHutang!.sisaHutang) {
+        return '${AppStrings.jumlahMelebihiSisa}'
+            '${CurrencyFormatter.full(_selectedHutang!.sisaHutang)}';
+      }
+    }
+
     return null;
   }
 
-  bool _validateCategory() {
-    if (_selectedCategory == null) return false;
-    return true;
+  bool _validateCategory() => _selectedCategory != null;
+
+  /// Validasi tambahan untuk alur pembayaran hutang.
+  /// Mengembalikan pesan error atau null jika valid.
+  String? _validateHutangSelection() {
+    if (!_isPembayaranHutang) return null;
+    if (_selectedHutang == null) return AppStrings.pilihHutang;
+    return null;
   }
 
-  // ── Date picker ─────────────────────────────────────────────────────────
+  // ── Date picker ───────────────────────────────────────────────────────────
 
   Future<void> _pickDate() async {
     final picked = await showDatePicker(
       context: context,
       initialDate: _selectedDate,
       firstDate: DateTime(2000),
-      lastDate: DateTime(2100), // No upper-limit: future dates are allowed.
+      lastDate: DateTime(2100),
       locale: const Locale('id', 'ID'),
       builder: (context, child) => Theme(
         data: Theme.of(context).copyWith(
@@ -97,23 +135,42 @@ class _TransactionFormScreenState
     if (picked != null) setState(() => _selectedDate = picked);
   }
 
-  // ── Save ────────────────────────────────────────────────────────────────
+  // ── Simpan ────────────────────────────────────────────────────────────────
 
+  /// Menyimpan transaksi baru atau memperbarui transaksi yang sedang diedit.
+  ///
+  /// **Alur normal (kategori biasa):**
+  ///   1. Validasi form + kategori.
+  ///   2. repo.insert(tx) / repo.update(tx) → tulis ke SQLite via Drift.
+  ///   3. allTransactionsProvider memancar ulang → HomeSummary & laporan terupdate.
+  ///   4. Navigator.pop() → kembali ke layar sebelumnya.
+  ///
+  /// **Alur khusus (kategori "Pembayaran Hutang"):**
+  ///   1. Validasi form + validasi hutang yang dipilih.
+  ///   2. repo.insert(tx) → buat transaksi pengeluaran di SQLite.
+  ///   3. hutangNotifier.updateAfterPayment() → kurangi sisaHutang di tabel hutang.
+  ///      PENTING: updateAfterPayment TIDAK membuat transaksi baru (sudah dibuat langkah 2).
+  ///   4. Kedua stream (allTransactionsProvider + hutangListProvider) memancar ulang.
+  ///
+  /// **Efek ke state/UI setelah _save():**
+  ///   - [allTransactionsProvider] → [homeSummaryProvider] → HomeScreen rebuild
+  ///   - [hutangListProvider] → HutangListScreen rebuild (jika pembayaran hutang)
+  ///   - Laporan (daily/monthly/yearly) refresh otomatis via FutureProvider kedaluwarsa
   Future<void> _save() async {
     final isFormValid = _formKey.currentState!.validate();
     final hasCat = _validateCategory();
+    final hutangError = _validateHutangSelection();
 
-    if (!isFormValid || !hasCat) {
+    if (!isFormValid || !hasCat || hutangError != null) {
       if (!hasCat) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text(AppStrings.categoryRequired)),
-        );
+        _showSnack(AppStrings.categoryRequired);
+      } else if (hutangError != null) {
+        _showSnack(hutangError);
       }
       return;
     }
 
-    final rawDigits =
-        _amountController.text.replaceAll(RegExp(r'[^0-9]'), '');
+    final rawDigits = _amountController.text.replaceAll(RegExp(r'[^0-9]'), '');
     final amount = double.tryParse(rawDigits) ?? 0;
 
     setState(() => _isSaving = true);
@@ -121,6 +178,8 @@ class _TransactionFormScreenState
     try {
       final repo = ref.read(transactionRepositoryProvider);
       final now = DateTime.now();
+
+      // Buat/perbarui transaksi utama
       final tx = Transaction(
         id: widget.editTransaction?.id ?? const Uuid().v4(),
         type: _type,
@@ -139,18 +198,32 @@ class _TransactionFormScreenState
         await repo.insert(tx);
       }
 
+      // ── Integrasi Hutang ─────────────────────────────────────────────────
+      // Jika kategori "Pembayaran Hutang" dan ada hutang yang dipilih,
+      // perbarui record hutang (sisa + riwayat) TANPA membuat transaksi baru
+      // (transaksi sudah dibuat di atas).
+      if (_isPembayaranHutang && _selectedHutang != null) {
+        final catatan = _noteController.text.trim().isEmpty
+            ? null
+            : _noteController.text.trim();
+        await ref.read(hutangNotifierProvider.notifier).updateAfterPayment(
+              _selectedHutang!.id,
+              amount,
+              catatan: catatan,
+              paidAt: AppDateUtils.dateOnly(_selectedDate),
+            );
+      }
+
       if (!mounted) return;
       Navigator.of(context).pop();
     } catch (e) {
       if (!mounted) return;
       setState(() => _isSaving = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${AppStrings.errorGeneral} ($e)')),
-      );
+      _showSnack('${AppStrings.errorGeneral} ($e)');
     }
   }
 
-  // ── Delete ──────────────────────────────────────────────────────────────
+  // ── Hapus ─────────────────────────────────────────────────────────────────
 
   Future<void> _delete() async {
     final confirm = await showDialog<bool>(
@@ -184,23 +257,41 @@ class _TransactionFormScreenState
     } catch (e) {
       if (!mounted) return;
       setState(() => _isSaving = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${AppStrings.errorGeneral} ($e)')),
-      );
+      _showSnack('${AppStrings.errorGeneral} ($e)');
     }
   }
 
-  // ── Type toggle ─────────────────────────────────────────────────────────
+  // ── Toggle tipe pemasukan/pengeluaran ─────────────────────────────────────
 
   void _toggleType(TransactionType t) {
     if (t == _type) return;
     setState(() {
       _type = t;
-      _selectedCategory = null; // clear category when type changes
+      _selectedCategory = null;
+      _selectedHutang = null; // Reset hutang saat ganti tipe
     });
   }
 
-  // ── Build ───────────────────────────────────────────────────────────────
+  // ── Callback pemilihan kategori ───────────────────────────────────────────
+
+  void _onCategorySelected(Category c) {
+    setState(() {
+      _selectedCategory = c;
+      // Reset hutang jika kategori berubah dari "Pembayaran Hutang"
+      if (c.id != SystemCategories.pembayaranHutangId) {
+        _selectedHutang = null;
+      }
+    });
+  }
+
+  // ── Helper ────────────────────────────────────────────────────────────────
+
+  void _showSnack(String msg) {
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  // ── Build ─────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -247,10 +338,13 @@ class _TransactionFormScreenState
                           onChanged: _toggleType,
                         ),
                         SizedBox(height: AppSpacing.cardGap(context)),
-                        _AmountSection(controller: _amountController, validator: _validateAmount),
+                        _AmountSection(
+                          controller: _amountController,
+                          validator: _validateAmount,
+                        ),
                         SizedBox(height: AppSpacing.sectionGap(context)),
                         _SectionLabel(label: AppStrings.category),
-                        SizedBox(height: AppSpacing.sm),
+                        const SizedBox(height: 8),
                         catAsync.when(
                           loading: () => const SizedBox(
                               height: 120,
@@ -261,10 +355,20 @@ class _TransactionFormScreenState
                           data: (cats) => CategoryGridPicker(
                             categories: cats,
                             selected: _selectedCategory,
-                            onSelected: (c) =>
-                                setState(() => _selectedCategory = c),
+                            onSelected: _onCategorySelected,
                           ),
                         ),
+
+                        // ── Hutang picker (muncul saat "Pembayaran Hutang") ──
+                        if (_isPembayaranHutang) ...[
+                          SizedBox(height: AppSpacing.sectionGap(context)),
+                          _HutangPicker(
+                            selectedHutang: _selectedHutang,
+                            onHutangSelected: (h) =>
+                                setState(() => _selectedHutang = h),
+                          ),
+                        ],
+
                         SizedBox(height: AppSpacing.sectionGap(context)),
                         _DateField(
                           date: _selectedDate,
@@ -277,10 +381,10 @@ class _TransactionFormScreenState
                     ),
                   ),
                 ),
-                // ── Sticky save button ──────────────────────────────
+                // ── Tombol simpan sticky ─────────────────────────────────
                 Container(
-                  padding: EdgeInsets.fromLTRB(
-                      padding, 12, padding, padding),
+                  padding:
+                      EdgeInsets.fromLTRB(padding, 12, padding, padding),
                   decoration: const BoxDecoration(
                     color: AppColors.surface,
                     border: Border(
@@ -305,6 +409,158 @@ class _TransactionFormScreenState
           ),
         ),
       ),
+    );
+  }
+}
+
+// ── Hutang picker (section baru) ──────────────────────────────────────────────
+
+/// Menampilkan daftar hutang aktif agar pengguna bisa memilih hutang yang dibayar.
+///
+/// Ditampilkan hanya ketika kategori "Pembayaran Hutang" dipilih.
+/// Jika tidak ada hutang aktif, tampilkan pesan informatif.
+class _HutangPicker extends ConsumerWidget {
+  final HutangEntity? selectedHutang;
+  final ValueChanged<HutangEntity?> onHutangSelected;
+
+  const _HutangPicker({
+    required this.selectedHutang,
+    required this.onHutangSelected,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final hutangAsync = ref.watch(hutangListProvider);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _SectionLabel(label: AppStrings.pilihHutang),
+        const SizedBox(height: 8),
+        hutangAsync.when(
+          loading: () => const SizedBox(
+              height: 56, child: AppLoadingIndicator()),
+          error: (e, _) => Text(AppStrings.errorLoad,
+              style: const TextStyle(color: AppColors.expense)),
+          data: (list) {
+            final aktif = list.where((h) => !h.isLunas).toList();
+
+            // Tidak ada hutang aktif → tampilkan pesan validasi
+            if (aktif.isEmpty) {
+              return Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: AppColors.debtLight,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                      color: AppColors.debt.withValues(alpha: 0.3),
+                      width: 1),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.info_outline_rounded,
+                        color: AppColors.debt, size: 18),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        AppStrings.belumAdaHutangUntukDibayar,
+                        style: TextStyle(
+                          fontSize: AppTypeScale.caption(context),
+                          color: AppColors.debt,
+                          height: 1.4,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }
+
+            // Tampilkan dropdown hutang aktif
+            return Container(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 14, vertical: 4),
+              decoration: BoxDecoration(
+                color: AppColors.surfaceVariant,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                    color: AppColors.debt.withValues(alpha: 0.4),
+                    width: 1),
+              ),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<HutangEntity>(
+                  value: selectedHutang,
+                  hint: Text(
+                    AppStrings.pilihHutangHint,
+                    style: TextStyle(
+                      color: AppColors.textHint,
+                      fontSize: AppTypeScale.bodyText(context),
+                    ),
+                  ),
+                  icon: const Icon(Icons.keyboard_arrow_down_rounded,
+                      color: AppColors.debt),
+                  isExpanded: true,
+                  onChanged: onHutangSelected,
+                  items: aktif.map((h) {
+                    return DropdownMenuItem<HutangEntity>(
+                      value: h,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            h.namaKreditur,
+                            style: TextStyle(
+                              fontSize: AppTypeScale.bodyText(context),
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textPrimary,
+                            ),
+                          ),
+                          Text(
+                            'Sisa: ${CurrencyFormatter.full(h.sisaHutang)}',
+                            style: TextStyle(
+                              fontSize: AppTypeScale.caption(context),
+                              color: AppColors.debt,
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
+            );
+          },
+        ),
+        if (selectedHutang != null) ...[
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(
+                horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: AppColors.debtLight,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.info_outline_rounded,
+                    color: AppColors.debt, size: 16),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Sisa hutang: ${CurrencyFormatter.full(selectedHutang!.sisaHutang)}. '
+                    'Jumlah maksimal pembayaran: ${CurrencyFormatter.full(selectedHutang!.sisaHutang)}',
+                    style: TextStyle(
+                      fontSize: AppTypeScale.caption(context),
+                      color: AppColors.debt,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ],
     );
   }
 }
@@ -389,16 +645,20 @@ class _TypeButton extends StatelessWidget {
             children: [
               Icon(icon,
                   size: 18,
-                  color: isSelected ? color : AppColors.textSecondary),
+                  color: isSelected
+                      ? color
+                      : AppColors.textSecondary),
               const SizedBox(width: 6),
               Text(
                 label,
                 style: TextStyle(
                   fontSize: AppTypeScale.bodyText(context),
-                  fontWeight:
-                      isSelected ? FontWeight.w600 : FontWeight.w400,
-                  color:
-                      isSelected ? color : AppColors.textSecondary,
+                  fontWeight: isSelected
+                      ? FontWeight.w600
+                      : FontWeight.w400,
+                  color: isSelected
+                      ? color
+                      : AppColors.textSecondary,
                 ),
               ),
             ],
@@ -420,16 +680,14 @@ class _AmountSection extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        // Live formatted preview
+        // Preview jumlah yang diformat
         ValueListenableBuilder(
           valueListenable: controller,
           builder: (ctx, value, _) {
             final raw = value.text.replaceAll(RegExp(r'[^0-9]'), '');
             final amount = double.tryParse(raw) ?? 0;
             return Text(
-              amount > 0
-                  ? CurrencyFormatter.full(amount)
-                  : 'Rp 0',
+              amount > 0 ? CurrencyFormatter.full(amount) : 'Rp 0',
               style: TextStyle(
                 fontSize: AppTypeScale.balanceDisplay(context),
                 fontWeight: FontWeight.w700,

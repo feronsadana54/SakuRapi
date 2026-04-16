@@ -2,9 +2,19 @@
 //
 // Covers:
 //  - Splash renders app name and tagline.
-//  - After the 1.6-second timer, navigates to /home when onboarding is done.
+//  - After the 1.6-second timer, navigates to /home when onboarding is done
+//    AND the user is already logged in.
+//  - After the 1.6-second timer, navigates to /login when onboarding is done
+//    but the user is NOT logged in (no auth credentials in SharedPreferences).
 //  - After the 1.6-second timer, navigates to /onboarding when not done.
 //  - Navigation falls through to /home on repository error (never hangs).
+//
+// Navigation decision tree in SplashScreen._navigate():
+//   onboarding done? → no  → /onboarding
+//   onboarding done? → yes → check getCurrentUser()
+//                             user != null → /home
+//                             user == null → /login
+//   any exception   → /home (fail-safe)
 //
 // Run: flutter test test/widget/splash_navigation_test.dart
 
@@ -55,11 +65,16 @@ class _ThrowingSettingsRepo implements ISettingsRepository {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/// Builds a minimal routed app with SplashScreen at '/'.
+/// Builds a minimal routed app with SplashScreen at '/splash'.
+///
+/// Routes include /home, /onboarding, AND /login so that every possible
+/// navigation target from [SplashScreen._navigate] resolves without error,
+/// regardless of whether auth credentials are present in [prefs].
 Widget _app({
   required SharedPreferences prefs,
   required Widget homePage,
   required Widget onboardingPage,
+  Widget? loginPage,
 }) {
   final router = GoRouter(
     initialLocation: '/splash',
@@ -75,6 +90,13 @@ Widget _app({
       GoRoute(
         path: '/onboarding',
         builder: (_, _) => onboardingPage,
+      ),
+      // /login is required because the splash navigates here when onboarding
+      // is complete but the user is not yet signed in.
+      GoRoute(
+        path: '/login',
+        builder: (_, _) =>
+            loginPage ?? const Scaffold(body: Text('Login')),
       ),
     ],
   );
@@ -118,8 +140,17 @@ void main() {
   });
 
   group('SplashScreen — navigation', () {
-    testWidgets('navigates to /home when onboarding is complete', (tester) async {
-      SharedPreferences.setMockInitialValues({'onboarding_complete': true});
+    testWidgets(
+        'navigates to /home when onboarding is complete and user is logged in',
+        (tester) async {
+      // Set onboarding complete AND a valid guest session so getCurrentUser()
+      // returns a non-null user → splash goes to /home, not /login.
+      SharedPreferences.setMockInitialValues({
+        'onboarding_complete': true,
+        'saku_auth_id': 'test-guest-id',
+        'saku_auth_name': 'Tamu',
+        'saku_auth_mode': 'guest',
+      });
       final prefs = await SharedPreferences.getInstance();
 
       await tester.pumpWidget(_app(
@@ -134,10 +165,35 @@ void main() {
 
       expect(find.text('Beranda'), findsOneWidget);
       expect(find.text('Onboarding'), findsNothing);
+      expect(find.text('Login'), findsNothing);
+    });
+
+    testWidgets(
+        'navigates to /login when onboarding is complete but user is not logged in',
+        (tester) async {
+      // Onboarding done but no auth credentials → getCurrentUser() returns null
+      // → splash navigates to /login.
+      SharedPreferences.setMockInitialValues({'onboarding_complete': true});
+      final prefs = await SharedPreferences.getInstance();
+
+      await tester.pumpWidget(_app(
+        prefs: prefs,
+        homePage: const Scaffold(body: Text('Beranda')),
+        onboardingPage: const Scaffold(body: Text('Onboarding')),
+        loginPage: const Scaffold(body: Text('Login')),
+      ));
+
+      await tester.pump(const Duration(milliseconds: 1700));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Login'), findsOneWidget);
+      expect(find.text('Beranda'), findsNothing);
     });
 
     testWidgets('navigates to /onboarding when onboarding is not complete',
         (tester) async {
+      // onboarding_complete: false → splash skips auth check and goes directly
+      // to /onboarding without checking whether the user is logged in.
       SharedPreferences.setMockInitialValues({'onboarding_complete': false});
       final prefs = await SharedPreferences.getInstance();
 
@@ -154,10 +210,10 @@ void main() {
       expect(find.text('Beranda'), findsNothing);
     });
 
-    testWidgets('falls through to /home when onboarding key is missing',
+    testWidgets('navigates to /onboarding on first launch (key missing)',
         (tester) async {
-      // No key set → isOnboardingComplete returns false by default,
-      // so this goes to onboarding on first launch.
+      // No key set → isOnboardingComplete returns false (SettingsRepositoryImpl
+      // default) → splash treats this as a first launch → /onboarding.
       SharedPreferences.setMockInitialValues({});
       final prefs = await SharedPreferences.getInstance();
 
@@ -170,8 +226,9 @@ void main() {
       await tester.pump(const Duration(milliseconds: 1700));
       await tester.pumpAndSettle();
 
-      // Missing key → onboarding_complete = false → goes to onboarding.
+      // Missing key → onboarding_complete = false → first launch → onboarding.
       expect(find.text('Onboarding'), findsOneWidget);
+      expect(find.text('Beranda'), findsNothing);
     });
 
     testWidgets('falls through to /home when repository throws an error',

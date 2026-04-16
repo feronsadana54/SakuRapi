@@ -6,6 +6,15 @@ import 'core/constants/app_strings.dart';
 import 'core/theme/app_theme.dart';
 import 'router/app_router.dart';
 
+/// Widget root aplikasi — titik masuk seluruh widget tree.
+///
+/// Dibuat oleh [main] di dalam [ProviderScope] sehingga semua Riverpod provider
+/// dapat diakses di seluruh widget tree.
+///
+/// Tanggung jawab:
+/// - Membangun [MaterialApp.router] yang terhubung ke [routerProvider] (GoRouter).
+/// - Menerapkan tema global [AppTheme.light] dan locale Bahasa Indonesia.
+/// - TIDAK menangani logika navigasi — itu ada di [SplashScreen].
 class App extends ConsumerWidget {
   const App({super.key});
 

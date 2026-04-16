@@ -24,6 +24,12 @@ abstract final class AppColors {
   static const Color textSecondary = Color(0xFF6B7280);
   static const Color textHint = Color(0xFF9CA3AF);
 
+  // ── Hutang & Piutang ──────────────────────────────────────────────────
+  static const Color debt = Color(0xFFE65100);         // orange-red for hutang
+  static const Color debtLight = Color(0xFFFFF3E0);
+  static const Color receivable = Color(0xFF1565C0);   // primary blue for piutang
+  static const Color receivableLight = Color(0xFFE3F2FD);
+
   // ── Misc ──────────────────────────────────────────────────────────────
   static const Color divider = Color(0xFFE5E7EB);
   static const Color shimmer = Color(0xFFE0E0E0);

@@ -65,7 +65,7 @@ class ExportImportService {
 
   /// Opens a file picker for CSV files and returns parsed rows.
   /// Returns null if the user cancels the picker.
-  /// Throws a [FormatException] if the file is not a valid DompetKu CSV.
+  /// Throws a [FormatException] if the file is not a valid SakuRapi CSV.
   Future<List<ImportRow>?> pickAndParse() async {
     final content = await pickCsvContent();
     if (content == null) return null;
@@ -81,7 +81,7 @@ class ExportImportService {
     for (var i = 0; i < _headers.length; i++) {
       if (i >= header.length || header[i] != _headers[i]) {
         throw const FormatException(
-          'Format CSV tidak valid. Pastikan file diekspor dari DompetKu.',
+          'Format CSV tidak valid. Pastikan file diekspor dari SakuRapi.',
         );
       }
     }

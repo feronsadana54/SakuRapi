@@ -6,7 +6,7 @@ import '../../../core/responsive/breakpoints.dart';
 import '../../../router/app_router.dart';
 
 /// Root scaffold that wraps all main tab screens.
-/// Renders [BottomNavigationBar] on mobile and [NavigationRail] on tablet.
+/// Renders [NavigationBar] on mobile and [NavigationRail] on tablet.
 class AppShell extends StatelessWidget {
   final Widget child;
   final String location;
@@ -20,6 +20,8 @@ class AppShell extends StatelessWidget {
   static const _tabs = [
     AppRoutes.home,
     AppRoutes.transactionList,
+    AppRoutes.hutangList,
+    AppRoutes.piutangList,
     AppRoutes.reports,
     AppRoutes.settings,
   ];
@@ -46,6 +48,16 @@ class AppShell extends StatelessWidget {
       icon: Icons.swap_horiz_outlined,
       activeIcon: Icons.swap_horiz_rounded,
       label: AppStrings.navTransactions,
+    ),
+    _NavItem(
+      icon: Icons.money_off_outlined,
+      activeIcon: Icons.money_off_rounded,
+      label: AppStrings.navHutang,
+    ),
+    _NavItem(
+      icon: Icons.attach_money_outlined,
+      activeIcon: Icons.attach_money_rounded,
+      label: AppStrings.navPiutang,
     ),
     _NavItem(
       icon: Icons.bar_chart_outlined,
@@ -85,19 +97,16 @@ class AppShell extends StatelessWidget {
       );
     }
 
-    final showLabels = !context.isSmall;
-
     return Scaffold(
       body: child,
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _currentIndex,
-        onTap: (i) => _onTabTap(context, i),
-        showSelectedLabels: showLabels,
-        showUnselectedLabels: showLabels,
-        items: _navItems
-            .map((item) => BottomNavigationBarItem(
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _currentIndex,
+        onDestinationSelected: (i) => _onTabTap(context, i),
+        labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
+        destinations: _navItems
+            .map((item) => NavigationDestination(
                   icon: Icon(item.icon),
-                  activeIcon: Icon(item.activeIcon),
+                  selectedIcon: Icon(item.activeIcon),
                   label: item.label,
                 ))
             .toList(),

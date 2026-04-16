@@ -2,28 +2,45 @@ import 'package:drift/drift.dart';
 import 'package:drift_flutter/drift_flutter.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../core/constants/system_categories.dart';
 import 'daos/category_dao.dart';
+import 'daos/hutang_dao.dart';
+import 'daos/piutang_dao.dart';
 import 'daos/transaction_dao.dart';
 import 'tables/categories_table.dart';
+import 'tables/hutang_table.dart';
+import 'tables/payment_history_table.dart';
+import 'tables/piutang_table.dart';
 import 'tables/transactions_table.dart';
 
 part 'app_database.g.dart';
 
+/// Database utama aplikasi menggunakan Drift (SQLite).
+///
+/// Mendaftarkan semua tabel dan DAO. Saat menambah tabel baru:
+///   1. Buat file tabel di lib/data/database/tables/
+///   2. Buat DAO di lib/data/database/daos/
+///   3. Tambahkan ke annotation @DriftDatabase di sini
+///   4. Naikkan [schemaVersion] dan tambahkan case di [migration.onUpgrade]
+///   5. Jalankan: dart run build_runner build --delete-conflicting-outputs
+///
+/// Untuk testing, gunakan: AppDatabase(NativeDatabase.memory())
 @DriftDatabase(
-  tables: [CategoriesTable, TransactionsTable],
-  daos: [CategoryDao, TransactionDao],
+  tables: [
+    CategoriesTable,
+    TransactionsTable,
+    HutangTable,
+    PiutangTable,
+    PaymentHistoryTable,
+  ],
+  daos: [CategoryDao, TransactionDao, HutangDao, PiutangDao],
 )
 class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor])
       : super(executor ?? _openDatabase());
 
-  /// Opens a persistent SQLite database on Android/iOS, or a WASM-based
-  /// SQLite database on web (backed by IndexedDB or OPFS for persistence).
-  ///
-  /// On web the [DriftWebOptions] must point to the two static files placed
-  /// in the `web/` folder:
-  ///   • `web/sqlite3.wasm`  — compiled SQLite WebAssembly module
-  ///   • `web/drift_worker.js` — shared-worker used by drift for multi-tab sync
+  /// Membuka database SQLite persisten di Android/iOS, atau database SQLite
+  /// berbasis WASM di web (didukung IndexedDB atau OPFS untuk persistensi).
   static QueryExecutor _openDatabase() {
     return driftDatabase(
       name: 'finance_tracker',
@@ -35,17 +52,63 @@ class AppDatabase extends _$AppDatabase {
   }
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 4;
 
+  /// Strategi migrasi database.
+  ///
+  /// Riwayat versi skema:
+  ///   v1 → Tabel categories + transactions
+  ///   v2 → Tambah hutang_table, piutang_table, payment_history
+  ///   v3 → Seed kategori sistem: Pembayaran Hutang & Penerimaan Piutang
+  ///   v4 → Seed kategori sistem: Memberi Pinjaman (untuk piutang baru)
   @override
   MigrationStrategy get migration => MigrationStrategy(
         onCreate: (m) async {
           await m.createAll();
           await _seedDefaultCategories();
         },
+        onUpgrade: (m, from, to) async {
+          if (from < 2) {
+            // Versi 1 → 2: tambah tabel hutang, piutang, payment_history
+            await m.createTable(hutangTable);
+            await m.createTable(piutangTable);
+            await m.createTable(paymentHistoryTable);
+          }
+          if (from < 3) {
+            // Versi 2 → 3: seed kategori sistem untuk integrasi hutang/piutang
+            await _insertSystemCategoriesIfMissing();
+          }
+          if (from < 4) {
+            // Versi 3 → 4: seed kategori Memberi Pinjaman untuk alur piutang baru
+            await _insertSystemCategoriesIfMissing();
+          }
+        },
       );
 
   // ── Seed data ──────────────────────────────────────────────────────────
+
+  /// Memasukkan kategori sistem menggunakan INSERT OR IGNORE sehingga aman dipanggil
+  /// pada database yang sudah ada (duplikat diabaikan secara diam-diam).
+  ///
+  /// Kategori sistem memiliki ID tetap (sys-*) agar dapat direferensikan dari
+  /// kode tanpa perlu query terlebih dahulu.
+  /// Memasukkan SEMUA kategori sistem menggunakan INSERT OR IGNORE.
+  /// Aman dipanggil pada database yang sudah ada — duplikat diabaikan.
+  Future<void> _insertSystemCategoriesIfMissing() async {
+    for (final cat in SystemCategories.all) {
+      await into(categoriesTable).insert(
+        CategoriesTableCompanion.insert(
+          id: cat.id,
+          name: cat.name,
+          iconCode: cat.iconCode,
+          colorValue: cat.colorValue,
+          type: cat.type.value,
+          isDefault: const Value(true),
+        ),
+        mode: InsertMode.insertOrIgnore,
+      );
+    }
+  }
 
   Future<void> _seedDefaultCategories() async {
     const uuid = Uuid();
@@ -77,6 +140,9 @@ class AppDatabase extends _$AppDatabase {
     for (final cat in [...expenseCategories, ...incomeCategories]) {
       await into(categoriesTable).insert(cat);
     }
+
+    // System integration categories (fixed IDs, always present)
+    await _insertSystemCategoriesIfMissing();
   }
 
   CategoriesTableCompanion _cat(

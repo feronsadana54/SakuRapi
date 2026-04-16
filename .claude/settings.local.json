@@ -25,7 +25,8 @@
       "Read(//tmp/**)",
       "Bash(dart pub *)",
       "Bash(powershell -Command \"Invoke-WebRequest -Uri 'https://github.com/simolus3/sqlite3.dart/releases/download/sqlite3-2.9.4/sqlite3.wasm' -OutFile 'D:/belajar-pemrograman/project-mandiri/aplikasi/project_ai_claude_apk_android_ios/web/sqlite3.wasm'\")",
-      "Bash(flutter build *)"
+      "Bash(flutter build *)",
+      "Bash(echo \"no docs dir\" ls D:/belajar-pemrograman/project-mandiri/aplikasi/project_ai_claude_apk_android_ios/*.md)"
     ]
   }
 }

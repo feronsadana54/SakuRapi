@@ -2,8 +2,8 @@
 /// Do NOT put strings directly in widgets — always reference this class.
 abstract final class AppStrings {
   // ── App ───────────────────────────────────────────────────────────────
-  static const String appName = 'DompetKu';
-  static const String tagline = 'Catat. Pantau. Hemat.';
+  static const String appName = 'SakuRapi';
+  static const String tagline = 'Kelola Saku, Rapi Keuangan.';
   static const String locale = 'id_ID';
 
   // ── Navigation ────────────────────────────────────────────────────────
@@ -13,7 +13,7 @@ abstract final class AppStrings {
   static const String navSettings = 'Pengaturan';
 
   // ── Onboarding ────────────────────────────────────────────────────────
-  static const String onboardingTitle1 = 'Selamat Datang di DompetKu';
+  static const String onboardingTitle1 = 'Selamat Datang di SakuRapi';
   static const String onboardingDesc1 =
       'Kelola keuangan harianmu dengan mudah dan cerdas, kapan saja dan di mana saja.';
   static const String onboardingTitle2 = 'Catat Semua Transaksi';
@@ -134,11 +134,95 @@ abstract final class AppStrings {
   static const String notifChannelDesc =
       'Notifikasi pengingat untuk mencatat keuangan harian';
 
+  // ── Auth ──────────────────────────────────────────────────────────────
+  static const String loginTitle = 'Masuk ke SakuRapi';
+  static const String loginSubtitle = 'Pilih cara masuk yang kamu inginkan';
+  static const String loginAsGuest = 'Masuk sebagai Tamu';
+  static const String loginWithGoogle = 'Masuk dengan Google';
+  static const String guestModeNote = 'Mode tamu: data tersimpan di perangkat ini saja';
+  static const String googleSyncNote = 'Login Google: data disinkronkan ke cloud';
+  static const String logoutTitle = 'Keluar dari Akun';
+  static const String logoutConfirm = 'Apakah kamu yakin ingin keluar?';
+  static const String logout = 'Keluar';
+  static const String syncStatus = 'Status Sinkronisasi';
+  static const String syncNow = 'Sinkronkan Sekarang';
+  static const String dataBackedUp = 'Data tersimpan di cloud';
+  static const String dataLocalOnly = 'Data hanya di perangkat ini';
+  static const String notifPermTitle = 'Aktifkan Pengingat';
+  static const String notifPermDesc =
+      'SakuRapi bisa mengingatkanmu mencatat keuangan setiap hari agar kamu tidak lupa.';
+  static const String notifPermButton = 'Izinkan Notifikasi';
+  static const String notifPermSkip = 'Nanti Saja';
+
+  // ── Hutang & Piutang integrasi ────────────────────────────────────────
+  static const String belumAdaHutangUntukDibayar =
+      'Belum ada data hutang yang bisa dibayar. Silakan tambahkan hutang terlebih dahulu.';
+  static const String pilihHutang = 'Pilih Hutang yang Dibayar';
+  static const String pilihHutangHint = 'Pilih salah satu hutang aktif';
+  static const String jumlahMelebihiSisa =
+      'Jumlah melebihi sisa hutang. Maksimal: ';
+  static const String memberiPinjamanNote =
+      'Pencatatan pinjaman baru otomatis membuat transaksi pengeluaran.';
+  static const String pinjamanTercatat =
+      'Pinjaman berhasil dicatat sebagai pengeluaran';
+  static const String pembayaranHutangTercatat =
+      'Pembayaran hutang berhasil dicatat';
+
+  // ── Firebase / sync ───────────────────────────────────────────────────
+  static const String googleSignInFailed =
+      'Login Google gagal. Pastikan perangkat terkoneksi internet.';
+  static const String googleSignInNotConfigured =
+      'Login Google belum dikonfigurasi. Gunakan mode tamu untuk sementara.';
+  static const String syncingData = 'Menyinkronkan data...';
+  static const String syncSuccess = 'Data berhasil disinkronkan';
+  static const String syncFailed = 'Sinkronisasi gagal. Data lokal tetap aman.';
+  static const String cloudSyncEnabled = 'Sinkronisasi cloud aktif';
+  static const String cloudSyncDisabled = 'Mode offline';
+
+  // ── Hutang ────────────────────────────────────────────────────────────
+  static const String hutang = 'Hutang';
+  static const String piutang = 'Piutang';
+  static const String navHutang = 'Hutang';
+  static const String navPiutang = 'Piutang';
+  static const String tambahHutang = 'Tambah Hutang';
+  static const String tambahPiutang = 'Tambah Piutang';
+  static const String editHutang = 'Edit Hutang';
+  static const String editPiutang = 'Edit Piutang';
+  static const String namaKreditur = 'Nama Kreditur / Pemberi Hutang';
+  static const String namaPeminjam = 'Nama Peminjam';
+  static const String jumlahAwal = 'Jumlah Awal';
+  static const String sisaHutang = 'Sisa Hutang';
+  static const String sisaPiutang = 'Sisa Piutang';
+  static const String tanggalPinjam = 'Tanggal Pinjam';
+  static const String tanggalJatuhTempo = 'Tanggal Jatuh Tempo';
+  static const String statusAktif = 'Aktif';
+  static const String statusLunas = 'Lunas';
+  static const String bayarSebagian = 'Bayar Sebagian';
+  static const String tandaiLunas = 'Tandai Lunas';
+  static const String riwayatPembayaran = 'Riwayat Pembayaran';
+  static const String totalHutangAktif = 'Total Hutang Aktif';
+  static const String totalHutangLunas = 'Total Hutang Lunas';
+  static const String totalSisaHutang = 'Total Sisa Hutang';
+  static const String totalPiutangAktif = 'Total Piutang Aktif';
+  static const String totalPiutangLunas = 'Total Piutang Lunas';
+  static const String totalSisaPiutang = 'Total Sisa Piutang';
+  static const String jatuhTempoTerdekat = 'Jatuh Tempo Terdekat';
+  static const String belumAdaHutang = 'Belum Ada Hutang';
+  static const String belumAdaPiutang = 'Belum Ada Piutang';
+  static const String konfirmasiLunas = 'Tandai sebagai Lunas?';
+  static const String konfirmasiLunasBody = 'Hutang ini akan ditandai sebagai lunas.';
+  static const String inputJumlahBayar = 'Jumlah yang dibayar';
+  static const String kategoriHutangPiutang = 'Laporan Hutang & Piutang';
+  static const String deleteHutang = 'Hapus Hutang?';
+  static const String deletePiutang = 'Hapus Piutang?';
+  static const String deleteHutangBody = 'Data hutang ini akan dihapus permanen.';
+  static const String deletePiutangBody = 'Data piutang ini akan dihapus permanen.';
+
   // ── Export / Import ───────────────────────────────────────────────────────
   static const String exportCsv = 'Ekspor CSV';
   static const String exportCsvDesc = 'Bagikan semua transaksi sebagai file CSV';
   static const String importCsv = 'Impor CSV';
-  static const String importCsvDesc = 'Muat transaksi dari file CSV DompetKu';
+  static const String importCsvDesc = 'Muat transaksi dari file CSV SakuRapi';
   static const String exportSuccess = 'Ekspor berhasil';
   static const String importSuccess = 'Impor berhasil';
   static const String importConfirmTitle = 'Konfirmasi Impor';
@@ -147,7 +231,7 @@ abstract final class AppStrings {
   static const String noTransactionsToExport =
       'Belum ada transaksi untuk diekspor.';
   static const String importInvalidFormat =
-      'Format file tidak valid. Gunakan file CSV yang diekspor dari DompetKu.';
+      'Format file tidak valid. Gunakan file CSV yang diekspor dari SakuRapi.';
   static const String importing = 'Mengimpor data...';
 
   // ── Bulk delete ───────────────────────────────────────────────────────────

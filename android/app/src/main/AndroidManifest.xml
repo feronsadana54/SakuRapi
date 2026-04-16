@@ -1,5 +1,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- Internet access (Google Sign-In, future sync) -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Vibration for notifications -->
+    <uses-permission android:name="android.permission.VIBRATE"/>
     <!-- Notifications (Android 13+ requires runtime permission) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <!-- Exact alarm for 9 PM daily reminder -->
@@ -14,7 +18,7 @@
         android:maxSdkVersion="32"/>
 
     <application
-        android:label="DompetKu"
+        android:label="SakuRapi"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
 

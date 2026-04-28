@@ -30,7 +30,7 @@
 21. [Graf Ketergantungan Provider Riverpod](#graf-ketergantungan-provider-riverpod)
 22. [Navigasi GoRouter](#navigasi-gorouter)
 23. [Cara Menambah Fitur Baru](#cara-menambah-fitur-baru)
-24. [Mengaktifkan Firebase (Google Sign-In)](#mengaktifkan-firebase)
+24. [Firebase & Google Sign-In](#mengaktifkan-firebase)
 
 ---
 
@@ -48,7 +48,8 @@ Fitur utama:
 - **Hutang**: kamu meminjam uang dari orang/bank — setiap pembayaran otomatis kurangi saldo
 - **Piutang**: kamu meminjamkan uang ke orang lain — membuat piutang otomatis kurangi saldo; menerima cicilan otomatis tambah saldo
 - Laporan harian, bulanan, tahunan, rentang tanggal, dan siklus gajian (termasuk efek hutang/piutang)
-- Mode Tamu (data lokal saja) + Login Google (Firebase Auth + sinkronisasi Firestore)
+- Mode Tamu (data lokal saja) + Login Google + Login Email Link (Firebase Auth + sinkronisasi Firestore realtime)
+- **Multi-device sync**: data berubah di perangkat A → otomatis muncul di perangkat B via Firestore realtime listeners
 - Pengingat harian via notifikasi (jam dan hari yang bisa dikonfigurasi)
 - Ekspor/impor data CSV
 - UI modern Material 3 dalam Bahasa Indonesia
@@ -77,7 +78,7 @@ Aturan ketergantungan: Presentation bergantung ke Domain, Data mengimplementasik
 | Navigasi | go_router | 14.x |
 | Database lokal | drift (SQLite) | 2.x |
 | Auth lokal | shared_preferences | 2.x |
-| Auth cloud | firebase_auth + google_sign_in | 5.x / 6.x |
+| Auth cloud | firebase_auth + google_sign_in + app_links | 5.x / 6.x |
 | Cloud sync | cloud_firestore | 5.x |
 | Notifikasi | flutter_local_notifications | 17.x |
 | Ekspor/impor | csv + file_picker | — |
@@ -100,7 +101,7 @@ Aturan ketergantungan: Presentation bergantung ke Domain, Data mengimplementasik
 lib/
 ├── main.dart                    ← TITIK MASUK aplikasi
 ├── app.dart                     ← Widget root, MaterialApp.router
-├── firebase_options.dart        ← Konfigurasi Firebase (kFirebaseConfigured flag)
+├── firebase_options.dart        ← Konfigurasi Firebase (credentials proyek sakurapi-aa6ac)
 │
 ├── core/
 │   ├── constants/
@@ -115,10 +116,12 @@ lib/
 │   │   ├── app_type_scale.dart  ← Ukuran font responsif
 │   │   └── responsive_container.dart
 │   ├── services/
-│   │   ├── auth_service.dart    ← Login tamu/Google, baca/tulis sesi ke SharedPrefs
-│   │   ├── sync_service.dart    ← Sinkronisasi Firestore (hanya aktif jika Firebase dikonfigurasi)
-│   │   ├── notification_service.dart ← Jadwal/batalkan notifikasi harian
-│   │   └── export_import_service.dart ← Ekspor/impor CSV
+│   │   ├── auth_service.dart           ← Login tamu/Google/EmailLink, baca/tulis sesi ke SharedPrefs
+│   │   ├── sync_service.dart           ← Write-to-Firestore (aktif untuk Google & EmailLink)
+│   │   ├── cloud_restore_service.dart  ← Restore data dari Firestore ke SQLite saat login
+│   │   ├── realtime_sync_service.dart  ← Firestore realtime listeners untuk sinkronisasi multi-perangkat
+│   │   ├── notification_service.dart   ← Jadwal/batalkan notifikasi harian
+│   │   └── export_import_service.dart  ← Ekspor/impor CSV
 │   ├── theme/
 │   │   └── app_theme.dart       ← Konfigurasi tema Material 3
 │   ├── utils/
@@ -156,7 +159,7 @@ lib/
 │   ├── enums/
 │   │   ├── transaction_type.dart    ← income | expense
 │   │   ├── category_type.dart       ← income | expense | both
-│   │   └── auth_mode.dart           ← guest | google
+│   │   └── auth_mode.dart           ← guest | google | emailLink
 │   └── repositories/               ← Interface/kontrak repository
 │       ├── i_transaction_repository.dart
 │       ├── i_category_repository.dart
@@ -196,8 +199,8 @@ lib/
 
 Mulai dari sini, baca berurutan:
 
-1. **`lib/main.dart`** — Titik masuk, cara inisialisasi Firebase, kapan notifikasi dijadwalkan
-2. **`lib/firebase_options.dart`** — Pahami flag `kFirebaseConfigured` yang mengontrol Firebase
+1. **`lib/main.dart`** — Titik masuk, inisialisasi Firebase, kapan notifikasi dijadwalkan
+2. **`lib/firebase_options.dart`** — Kredensial Firebase untuk proyek `sakurapi-aa6ac`
 3. **`lib/app.dart`** — Widget root, bagaimana MaterialApp dirakit
 4. **`lib/router/app_router.dart`** — Semua rute, mana yang pakai shell, mana yang standalone
 5. **`lib/presentation/features/splash/splash_screen.dart`** — Logika keputusan navigasi awal
@@ -222,10 +225,9 @@ Dart runtime memanggil main()
   │
   ├─ SharedPreferences.getInstance()   ← AWAIT (diperlukan sebelum runApp)
   │
-  ├─ if (kFirebaseConfigured)           ← CEK FLAG di firebase_options.dart
-  │   └─ Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform)
+  ├─ Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform)
   │       .timeout(Duration(seconds: 10))
-  │       └─ catch: abaikan, app tetap berjalan dalam mode lokal
+  │       └─ catch: abaikan, app tetap berjalan dalam mode lokal/tamu
   │
   ├─ runApp(ProviderScope(overrides: [sharedPreferencesProvider], child: App()))
   │   └─ App()  →  MaterialApp.router  →  GoRouter (initialLocation: /splash)
@@ -238,18 +240,14 @@ Dart runtime memanggil main()
           └─ scheduleReminders(hour, minute, weekdays)
 ```
 
-### Flag `kFirebaseConfigured`
+### Firebase Initialization
 
-File `lib/firebase_options.dart` berisi:
-```dart
-const bool kFirebaseConfigured = false;
-```
+Firebase selalu diinisialisasi saat startup via `Firebase.initializeApp()`.
+Jika inisialisasi gagal (offline, dll.), app tetap berjalan dalam mode lokal/tamu.
+Google Sign-In akan gagal dengan pesan error yang jelas jika Firebase tidak tersedia.
 
-Jika `false`: Firebase **tidak pernah diinisialisasi** — aplikasi berjalan penuh dalam mode lokal.
-Jika `true`: Firebase diinisialisasi; Google Sign-In aktif; sinkronisasi Firestore aktif.
-
-Untuk mengaktifkan Firebase, jalankan `flutterfire configure` dan set flag ke `true`.
-Lihat [Mengaktifkan Firebase](#mengaktifkan-firebase) untuk detail.
+Credentials ada di `lib/firebase_options.dart` (proyek: `sakurapi-aa6ac`).
+Lihat [Firebase & Google Sign-In](#mengaktifkan-firebase) untuk detail setup.
 
 ---
 
@@ -277,70 +275,396 @@ Lihat [Mengaktifkan Firebase](#mengaktifkan-firebase) untuk detail.
 
 ## Alur Login / Autentikasi
 
-**Masuk ke alur ini dari:** `SplashScreen._navigate()` ketika onboarding selesai tapi `getCurrentUser() == null`
+Seluruh autentikasi dikelola oleh `AuthService` (business logic) dan `AuthNotifier`
+(state management Riverpod). UI tidak mengakses Firebase/Google SDK secara langsung.
+
+---
+
+### Alur Startup & Pengecekan Auth State
 
 ```
-/login → LoginScreen
-  │
-  ├─ Tombol "Masuk sebagai Tamu"
-  │   └─ AuthNotifier.signInAsGuest()
-  │       └─ AuthService.signInAsGuest()
-  │           ├─ Buat UUID baru (atau pakai yang sudah ada)
-  │           ├─ Simpan ke SharedPreferences: saku_auth_id, saku_auth_name, saku_auth_mode='guest'
-  │           └─ Return UserEntity(id, 'Tamu', AuthMode.guest)
-  │       └─ context.go('/home')
-  │
-  └─ Tombol "Masuk dengan Google"
-      ├─ Jika !kFirebaseConfigured → SnackBar informatif, tidak ada perubahan state
-      └─ Jika kFirebaseConfigured:
-          └─ AuthNotifier.signInWithGoogle()
-              └─ AuthService.signInWithGoogle()
-                  ├─ GoogleSignIn().signIn()          ← Google OAuth popup
-                  ├─ GoogleSignInAccount → GoogleSignInAuthentication
-                  ├─ GoogleAuthProvider.credential(idToken, accessToken)
-                  ├─ FirebaseAuth.instance.signInWithCredential(credential)
-                  ├─ Simpan ke SharedPreferences: userId=uid, name=displayName, mode='google'
-                  └─ Return UserEntity(uid, displayName, AuthMode.google)
-              └─ SyncService.fetchAll() — unduh data dari Firestore ke lokal
-              └─ context.go('/home')
+App startup → main.dart
+  ├─ Firebase.initializeApp()   ← selalu dijalankan, kegagalan ditangani (app tetap berjalan)
+  ├─ SharedPreferences.getInstance()
+  └─ runApp(ProviderScope) → SplashScreen
+
+SplashScreen._navigate()
+  ├─ settingsRepository.isOnboardingComplete()  → false → /onboarding
+  └─ authService.getCurrentUser()               → dari SharedPreferences
+      ├─ null → /login
+      └─ UserEntity(mode=guest|google) → /home
 ```
+
+`getCurrentUser()` membaca SharedPreferences — cepat, tidak butuh jaringan.
+Sesi tetap aktif setelah restart karena tersimpan di SharedPreferences.
+
+---
+
+### Path A — Mode Tamu
+
+```
+/login → LoginScreen → Tombol "Masuk sebagai Tamu"
+  └─ AuthNotifier.signInAsGuest()
+      └─ AuthService.signInAsGuest()
+          ├─ Cek apakah saku_auth_id sudah ada (UUID sebelumnya)
+          ├─ Jika belum: buat UUID baru via Uuid().v4()
+          ├─ Simpan ke SharedPreferences:
+          │     saku_auth_id   = UUID
+          │     saku_auth_name = 'Tamu'
+          │     saku_auth_mode = 'guest'
+          └─ Return UserEntity(id=UUID, displayName='Tamu', AuthMode.guest)
+  └─ state = AsyncData(user) → GoRouter redirect ke /home
+
+Karakteristik Mode Tamu:
+  - Data tersimpan HANYA di SQLite lokal
+  - SyncService.isAvailable = false (tidak ada sync ke Firestore)
+  - UUID bertahan selama app tidak di-uninstall
+  - Bisa upgrade ke Google kapan saja tanpa kehilangan data
+```
+
+---
+
+### Path B — Login Google (dari Layar Login)
+
+Alur berbeda per platform. `AuthService.signInWithGoogle()` mendispatch ke
+`_signInWithGoogleWeb()` atau `_signInWithGoogleNative()` berdasarkan `kIsWeb`.
+
+**Optimasi UX**: setelah Firebase auth selesai, navigasi ke home terjadi *segera*.
+Cloud restore berjalan di background — tidak memblokir navigasi.
+
+```
+/login → LoginScreen → Tombol "Masuk dengan Google"
+  └─ AuthNotifier.signInWithGoogle()
+      └─ AuthService.signInWithGoogle()  ← BLOCKING (menunggu user pilih akun)
+          │
+          ├─ [kIsWeb = true] → _signInWithGoogleWeb()
+          │     └─ FirebaseAuth.instance.signInWithPopup(GoogleAuthProvider())
+          │         ← popup browser native, OAuth dikelola penuh oleh Firebase SDK
+          │         ← [popup ditutup pengguna] → return false (login dibatalkan)
+          │         ← [popup diblokir browser] → UI: "Browser memblokir popup..."
+          │     └─ UserCredential.user → _persistAndBuildUser()
+          │
+          └─ [kIsWeb = false] → _signInWithGoogleNative()
+                └─ GoogleSignIn.signOut()  ← paksa pilih akun baru
+                └─ GoogleSignIn.signIn()   ← dialog pemilih akun [BLOCKING ~1-5s user time]
+                └─ googleAccount.authentication → idToken [BLOCKING ~200-500ms]
+                └─ FirebaseAuth.signInWithCredential(credential) [BLOCKING ~200-800ms]
+                └─ _persistAndBuildUser():
+                     Simpan mode='google', id=uid ke SharedPreferences
+
+      ── AUTH SELESAI — NAVIGASI KE HOME SEKARANG ──
+
+      state = AsyncData(user) → GoRouter redirect ke /home
+      isBackgroundSyncingProvider = true  ← banner muncul di HomeScreen
+
+      [background] _restoreFromCloudBackground()
+          └─ CloudRestoreService.restoreFromCloud()
+              ├─ Future.wait([5 Firestore fetches])  ← paralel, bukan sequential
+              ├─ insertOrIgnore ke categories, transactions, payment_history
+              └─ last-write-wins ke hutang/piutang
+          └─ Kegagalan: non-fatal, data lokal tetap aman
+          └─ isBackgroundSyncingProvider = false  ← banner hilang
+
+HomeScreen:
+  - Drift reactive streams langsung memperbarui UI saat data baru masuk ke SQLite
+  - Banner "Sedang memulihkan data dari cloud..." terlihat selama restore berlangsung
+
+Catatan Platform:
+  Web     : signInWithPopup(GoogleAuthProvider()) — tidak perlu google_sign_in
+            Syarat: Authorized JavaScript Origins di Google Cloud Console
+  Android : GoogleSignIn(serverClientId: _webClientId) → signInWithCredential
+            Syarat: SHA-1 debug/release terdaftar di Firebase Console
+  iOS     : GoogleSignIn(serverClientId: _webClientId) → signInWithCredential
+            Syarat: GoogleService-Info.plist valid
+```
+
+---
+
+### Path C — Upgrade Tamu ke Google (dari Settings)
+
+**Optimasi UX**: Firebase auth selesai → state diperbarui segera.
+Upload data lokal (migrasi) + restore dari cloud keduanya berjalan di background.
+
+```
+SettingsScreen → AccountCard (mode tamu) → Tombol "Masuk dengan Google"
+  └─ AuthNotifier.upgradeGuestToGoogle()
+      ├─ AuthService.signInWithGoogle()     ← BLOCKING, sama dengan Path B
+      │   └─ SharedPreferences diperbarui: mode='google', id=Firebase UID
+      │   └─ SyncService.isAvailable = true (lazy, auto-aktif)
+      │
+      ── AUTH SELESAI — UPDATE STATE SEKARANG ──
+
+      state = AsyncData(googleUser)
+      isBackgroundSyncingProvider = true
+      SnackBar: "Login Google berhasil! Data kamu sedang disinkronkan..."
+
+      [background] _runUpgradeBackground()
+          ├─ _migrateLocalDataToCloud()   ← unggah data lokal ke Firestore
+          │   ├─ Baca SQLite: tx, hutang, piutang, kategori
+          │   └─ SyncService.migrateGuestData()  ← BATCH writes (maks 500/batch)
+          │       Semua record dikumpulkan → commit dalam satu/beberapa WriteBatch
+          │       Jauh lebih cepat dari sequential individual writes
+          │
+          └─ CloudRestoreService.restoreFromCloud()
+              (INSERT OR IGNORE — tidak overwrite data lokal yang sudah ada)
+
+      isBackgroundSyncingProvider = false  ← banner hilang
+
+Strategi Merge:
+  Upload (local wins): semua record ditulis ke Firestore via batch.
+    Record yang sama di cloud di-overwrite oleh versi lokal.
+  Restore (cloud fills gaps): INSERT OR IGNORE untuk kategori, transaksi, payment history.
+    Untuk hutang/piutang: cloud menang jika updatedAt cloud > updatedAt lokal.
+
+Yang TIDAK dimigrasikan:
+  - Settings (payday, notifikasi) — device-specific, tidak perlu sync
+```
+
+---
+
+### Path D — Logout (Google User)
+
+```
+SettingsScreen → AccountCard (mode Google) → Tombol "Keluar"
+  └─ _confirmLogout() → dialog konfirmasi
+      └─ AuthNotifier.signOut()
+          └─ AuthService.signOut()
+              ├─ mode == 'google':
+              │   ├─ _googleSignIn.signOut()           ← sign out dari Google SDK
+              │   └─ FirebaseAuth.instance.signOut()   ← hapus Firebase session
+              └─ Hapus dari SharedPreferences:
+                    saku_auth_id, saku_auth_name, saku_auth_email, saku_auth_mode
+  
+  state = AsyncData(null)
+  GoRouter redirect ke /login
+
+  Data lokal SQLite: TETAP ADA
+  Data cloud Firestore: TETAP ADA
+  Login ulang dengan akun yang sama: sesi Firebase baru, data cloud tetap ada
+```
+
+---
+
+### Path E — Akhiri Sesi Tamu (Guest User)
+
+```
+SettingsScreen → AccountCard (mode tamu) → Tombol "Akhiri Sesi Tamu"
+  └─ _confirmEndGuestSession() → dialog konfirmasi
+      └─ AuthNotifier.signOut()
+          └─ AuthService.signOut()
+              ├─ mode == 'guest': tidak ada Google/Firebase sign out
+              └─ Hapus dari SharedPreferences:
+                    saku_auth_id, saku_auth_name, saku_auth_mode
+
+  state = AsyncData(null)
+  GoRouter redirect ke /login
+
+  Data lokal SQLite: TETAP ADA (UUID tamu juga tetap tersimpan)
+  
+  Saat login sebagai tamu lagi:
+    UUID yang sama digunakan kembali → data lokal masih tersedia
+```
+
+---
+
+### Path F — Sync Cloud (Setiap Operasi Tulis)
+
+```
+Setiap insert/update/delete di repository (setelah login Google atau Email Link):
+  └─ SyncService.isAvailable?
+      ├─ false (mode tamu): return — tidak ada yang dikirim ke Firestore
+      └─ true (mode Google ATAU EmailLink):
+          └─ FirebaseFirestore
+               .collection('users').doc(userId)
+               .collection('transactions'|'hutang'|'piutang').doc(entityId)
+               .set({...fields, 'updatedAt': FieldValue.serverTimestamp()})
+               
+  Kegagalan sync: try/catch → diabaikan, data lokal tetap aman
+  SyncService.isAvailable dibaca lazy setiap panggilan (tidak di-cache)
+```
+
+---
 
 ### Kapan Sesi Aktif
 
 `SplashScreen` membaca `AuthService.getCurrentUser()` dari SharedPreferences.
-Jika ada sesi tersimpan, navigasi langsung ke `/home` tanpa harus login ulang.
+Jika ada sesi tersimpan, navigasi langsung ke `/home` tanpa login ulang.
+Sesi Google juga di-re-validate oleh Firebase SDK secara internal (token refresh).
 
 ---
 
 ## Alur Sinkronisasi Cloud (Firebase)
 
-Sinkronisasi **hanya aktif** jika `kFirebaseConfigured == true` DAN user login dengan Google.
+Sinkronisasi aktif untuk pengguna **Google** dan **Email Link** (`authMode == 'google' || 'emailLink'`).
+Pengguna tamu tidak pernah sync.
+
+### Arsitektur Sync — 3 Lapisan
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│  LAPISAN 1 — WRITE TO CLOUD (fire-and-forget)                                  │
+│  SyncService.upsertXxx() / deleteXxx()                                          │
+│  Dipanggil via unawaited() dari setiap Repository.insert/update/delete          │
+│  Tidak memblokir UI. Kegagalan ditangani diam-diam (try/catch).                 │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│  LAPISAN 2 — RESTORE ON LOGIN (one-time, background)                            │
+│  CloudRestoreService.restoreFromCloud()                                          │
+│  Dipanggil satu kali setelah login berhasil                                     │
+│  Fetch 5 koleksi paralel → tulis ke SQLite dengan strategi merge                │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│  LAPISAN 3 — REALTIME MULTI-DEVICE SYNC (persistent listeners)                  │
+│  RealtimeSyncService — 5 Firestore snapshots() listeners                        │
+│  Aktif selama pengguna terautentikasi                                            │
+│  Perubahan dari perangkat lain → langsung tulis ke SQLite → UI auto-refresh     │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Lapisan 1 — Write to Cloud
 
 ```
 SyncService
   │
-  ├─ isAvailable: kFirebaseConfigured && _userId != null
+  ├─ isAvailable: _userId != null && (authMode == 'google' || authMode == 'emailLink')
+  │   (dibaca lazy setiap panggilan — otomatis aktif setelah login)
   │
-  ├─ Setiap kali data berubah di lokal:
-  │   └─ Repository calls → SyncService.upsertXxx(entity)
-  │       └─ Firestore: users/{userId}/transactions|hutang|piutang/{id}
-  │
-  ├─ Saat login Google berhasil:
-  │   └─ SyncService.fetchAll()
-  │       ├─ fetchAllTransactions() → upsert ke DB lokal
-  │       ├─ fetchAllHutang() → upsert ke DB lokal
-  │       └─ fetchAllPiutang() → upsert ke DB lokal
-  │
-  └─ Semua operasi dibungkus try/catch
-      └─ Sync gagal → tidak crash app, hanya log error
+  └─ Setiap kali data berubah di lokal:
+      └─ Repository.insert/update/delete → SyncService.upsertXxx/deleteXxx()
+          └─ Firestore: users/{userId}/transactions|hutang|piutang|categories|payment_history/{id}
+          └─ fire-and-forget via unawaited() — tidak memblokir UI
+          └─ Kegagalan: try/catch → diabaikan, data lokal tetap aman
 ```
 
-**Aturan Firestore:**
+### Lapisan 2 — Restore on Login
+
 ```
-users/{userId}/transactions/{id}
-users/{userId}/hutang/{id}
-users/{userId}/piutang/{id}
+CloudRestoreService.restoreFromCloud()
+  ├─ Dipanggil saat: login Google, login Email Link, atau upgrade dari tamu
+  ├─ Future.wait([5 Firestore fetches]) ← paralel — hemat 4 round-trip jaringan
+  │
+  ├─ Strategi merge:
+  │   ├─ categories    : INSERT OR IGNORE (lokal menang jika sudah ada)
+  │   ├─ transactions  : INSERT OR IGNORE (immutable setelah dibuat)
+  │   ├─ hutang        : last-write-wins by updatedAt (cloud menang jika lebih baru)
+  │   ├─ piutang       : last-write-wins by updatedAt (cloud menang jika lebih baru)
+  │   └─ payment_history: INSERT OR IGNORE (immutable setelah dicatat)
+  │
+  └─ isBackgroundSyncingProvider = false setelah selesai → banner hilang
 ```
+
+### Lapisan 3 — Realtime Multi-Device Sync
+
+```
+RealtimeSyncService (5 Firestore CollectionReference.snapshots() listeners)
+  │
+  ├─ Diaktifkan oleh: _RealtimeSyncHandler di app.dart
+  │   └─ startListening(userId) dipanggil saat auth state → authenticated
+  │   └─ stopListening() dipanggil saat auth state → null/tamu
+  │
+  ├─ includeMetadataChanges: true + filter hasPendingWrites == true
+  │   └─ Echo tulisan lokal yang belum dikonfirmasi server dilewati
+  │   └─ Hanya perubahan yang dikonfirmasi server yang diproses
+  │
+  ├─ DocumentChangeType.added    → INSERT OR IGNORE (baru dari cloud)
+  ├─ DocumentChangeType.modified → INSERT OR REPLACE / last-write-wins (update)
+  └─ DocumentChangeType.removed  → DELETE dari SQLite lokal
+  │
+  ├─ Bypass repository: menulis langsung ke DAO
+  │   Alasan: repository menggunakan unawaited(sync.upsert*()) — akan membuat loop
+  │   upload jika kita lewat repository saat menulis data yang datang dari cloud
+  │
+  └─ Kegagalan: try/catch per event — satu error tidak menghentikan listener lain
+```
+
+### Perilaku Offline
+
+```
+Saat device offline:
+  ├─ SQLite lokal tetap berfungsi penuh (baca dan tulis)
+  ├─ SyncService.upsertXxx() gagal → diabaikan (data lokal aman)
+  ├─ RealtimeSyncService listener pause otomatis (Firestore SDK handle)
+  └─ UI tetap responsif
+
+Saat kembali online:
+  ├─ Firestore SDK reconnect otomatis
+  ├─ Listener menerima delta perubahan yang terlewat
+  └─ Data disinkronkan tanpa perlu manual refresh
+```
+
+**Struktur Firestore:**
+```
+users/{userId}/transactions/{id}     ← id, type, amount, categoryId, note, date, createdAt, updatedAt
+users/{userId}/hutang/{id}           ← id, namaKreditur, jumlahAwal, sisaHutang, tanggalPinjam, dll.
+users/{userId}/piutang/{id}          ← id, namaPeminjam, jumlahAwal, sisaPiutang, tanggalPinjam, dll.
+users/{userId}/categories/{id}       ← kategori KUSTOM saja (isDefault=false)
+users/{userId}/payment_history/{id}  ← id, referenceId, referenceType, amount, paidAt, catatan
+```
+
+**Rekomendasi Firestore Security Rules:**
+```javascript
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{userId}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+  }
+}
+```
+Rules ini memastikan setiap pengguna hanya bisa baca/tulis data miliknya sendiri.
+
+---
+
+## Inventaris Data Firebase — Apa yang Ada dan Tidak Ada di Firestore
+
+Tabel ini adalah sumber kebenaran untuk pertanyaan "data apa yang tersimpan di Firebase?"
+
+| Data | Lokal (SQLite/SharedPrefs) | Di Firestore | Tulis ke Cloud | Restore saat Login | Realtime Listener |
+|---|---|---|---|---|---|
+| **Transaksi** | ✅ SQLite `transactions` | ✅ Ya | ✅ WriteBatch: transaksi + kategorinya sekaligus | ✅ INSERT OR IGNORE + fallback categoryName | ✅ added→insertOrIgnore; modified→insertOrReplace; removed→delete |
+| **Hutang — summary** | ✅ SQLite `hutang` | ✅ Ya | ✅ insert / update / delete | ✅ last-write-wins by updatedAt | ✅ last-write-wins by updatedAt |
+| **Hutang — riwayat pembayaran** | ✅ SQLite `payment_history` | ✅ Ya | ✅ upsertPaymentRecord | ✅ INSERT OR IGNORE | ✅ insertOrIgnore; removed→delete |
+| **Piutang — summary** | ✅ SQLite `piutang` | ✅ Ya | ✅ insert / update / delete | ✅ last-write-wins by updatedAt | ✅ last-write-wins by updatedAt |
+| **Piutang — riwayat pembayaran** | ✅ SQLite `payment_history` | ✅ Ya | ✅ upsertPaymentRecord | ✅ INSERT OR IGNORE | ✅ insertOrIgnore; removed→delete |
+| **Kategori kustom** (isDefault=false) | ✅ SQLite `categories` | ✅ Ya | ✅ via upsertTransaction batch + upsertCategory / deleteCategory | ✅ INSERT OR IGNORE |
+| **Kategori default** (isDefault=true) | ✅ SQLite `categories` (ID stabil sejak v5) | ✅ Ya | ✅ via upsertTransaction batch + syncAllLocalCategories saat login | ✅ INSERT OR IGNORE (stable ID = sudah ada, diabaikan) |
+| **Settings** (payday, notifikasi) | ✅ SharedPreferences | ❌ **Tidak disimpan** | ❌ Tidak di-sync | ❌ Device-specific |
+| **Auth session** | ✅ SharedPreferences | ✅ Firebase Auth | — | — |
+
+### Catatan Implementasi
+
+**Kategori default dan kustom** — Sejak perbaikan ini, SEMUA kategori (termasuk `isDefault=true`)
+ditulis ke Firestore melalui dua mekanisme:
+1. `SyncService.upsertTransaction()` menggunakan **WriteBatch** yang sekaligus menulis
+   kategori dan transaksi secara atomik — sehingga koleksi `categories` selalu terisi
+   setiap kali transaksi dibuat atau diperbarui.
+2. `AuthNotifier._restoreBackground()` memanggil `syncAllLocalCategories()` setelah login
+   untuk memastikan semua 18+ kategori lokal (default + kustom) ada di Firestore.
+
+**Riwayat pembayaran** — `HutangRepositoryImpl.addPayment()` dan
+`PiutangRepositoryImpl.addPayment()` masing-masing memanggil
+`unawaited(_sync.upsertPaymentRecord(...))` setelah insert ke SQLite.
+
+**Cross-device restore** — `CloudRestoreService.restoreFromCloud()` dipanggil di
+`AuthNotifier.signInWithGoogle()` dan `upgradeGuestToGoogle()`. Restore bypass repository
+(langsung ke DAO) untuk menghindari re-upload ke Firestore saat restore.
+
+**Urutan restore:** Kategori → Transaksi → Hutang → Piutang → Riwayat Bayar.
+Kategori selalu diproses pertama agar foreign key `transactions.categoryId` dapat diselesaikan.
+
+**Fallback categoryName untuk transaksi** — Saat restore, jika `categoryId` dari Firestore
+tidak ditemukan di SQLite lokal (data lama sebelum migrasi v5 dengan UUID acak), layanan
+mencari kategori lokal berdasarkan `(categoryName|type)`. Ini menangani data lama yang sudah
+ada di Firestore dengan UUID acak sebelum migrasi v5. Jika nama juga tidak cocok, transaksi
+dilewati dan dicatat via `dev.log()` level 900.
+
+**Strategi merge per tabel:**
+- Kategori (semua) : INSERT OR IGNORE — lokal menang jika ID sudah ada; ID stabil (def-*/sys-*) dari seed selalu terpelihara
+- Transaksi         : INSERT OR IGNORE dengan fallback categoryName — immutable setelah dibuat
+- Riwayat bayar    : INSERT OR IGNORE — immutable setelah dicatat
+- Hutang/Piutang   : last-write-wins by `updatedAt` — cloud menang jika lebih baru
+
+**Settings** — `SettingsRepositoryImpl` hanya baca/tulis `SharedPreferences`. Tidak ada
+Firebase dependency. Setiap perangkat memiliki konfigurasi gajian dan notifikasi sendiri.
 
 ---
 
@@ -563,6 +887,30 @@ abstract final class SystemCategories {
 
 ---
 
+## Kategori Default — ID Stabil (sejak v5)
+
+Selain kategori sistem, terdapat 15 kategori default (10 pengeluaran + 5 pemasukan).
+Sejak skema v5, semua kategori default menggunakan **ID tetap** dari `DefaultCategoryIds`
+di `lib/data/database/app_database.dart`, bukan UUID acak.
+
+**Mengapa penting:** Sebelum v5, setiap install menghasilkan UUID berbeda untuk kategori yang
+sama. Transaksi di Firestore mereferensikan UUID perangkat A, sehingga restore ke perangkat B
+gagal karena UUID tidak cocok. Setelah v5, semua perangkat memiliki ID yang sama.
+
+**ID stabil:** Pola `def-{type}-{name}-v1` — contoh: `def-income-gaji-v1`, `def-expense-makan-v1`.
+
+**Migrasi v5:** Saat upgrade dari v4, `_migrateCategoryIdsToStable()`:
+1. Mencari semua kategori default dengan ID non-stabil (bukan `def-*` / `sys-*`)
+2. Mencocokkan ke stableId berdasarkan `(name|type)`
+3. Mengupdate referensi di tabel `transactions` terlebih dahulu
+4. Mengupdate primary key di tabel `categories`
+5. Seed kategori yang belum ada
+
+**JANGAN ubah** nilai di `DefaultCategoryIds` — transaksi di SQLite dan Firestore
+mereferensikan ID ini.
+
+---
+
 ## Alur Laporan Keuangan
 
 ```
@@ -749,6 +1097,7 @@ Digunakan oleh hutang dan piutang untuk menyimpan riwayat pembayaran.
 | 1 | 2 | Buat tabel hutang + payment_history |
 | 2 | 3 | Buat tabel piutang |
 | 3 | 4 | INSERT OR IGNORE kategori sistem (pembayaran hutang, penerimaan piutang, memberi pinjaman) |
+| 4 | 5 | Ganti UUID acak kategori default dengan ID stabil (`def-*`); update referensi di transactions |
 
 ---
 
@@ -767,6 +1116,13 @@ sharedPreferencesProvider  (diberikan via ProviderScope override)
   │
   └─ syncServiceProvider
       └─ dipakai oleh hutangNotifierProvider, piutangNotifierProvider, transactionNotifierProvider
+
+realtimeSyncServiceProvider  (listener Firestore → tulis ke DAO)
+  ├─ categoryDaoProvider
+  ├─ transactionDaoProvider
+  ├─ hutangDaoProvider
+  └─ piutangDaoProvider
+  [diaktifkan oleh _RealtimeSyncHandler di app.dart; listen ke currentUserProvider]
 
 appDatabaseProvider  (singleton AppDatabase)
   │
@@ -868,35 +1224,71 @@ ShellRoute → AppShell (bottom nav: Home, Transaksi, Hutang, Piutang, Laporan)
 
 ---
 
-## Mengaktifkan Firebase
+## Firebase & Google Sign-In
 
-Firebase diperlukan untuk **Login Google** dan **sinkronisasi cloud**.
-Tanpa Firebase, aplikasi berjalan penuh dalam mode lokal.
+Firebase sudah dikonfigurasi di proyek ini (proyek: `sakurapi-aa6ac`).
+Google Services plugin sudah aktif di Gradle. Konfigurasi publik ada di `lib/firebase_options.dart`.
 
-### Langkah Aktivasi
+### Catatan Keamanan Konfigurasi
 
-```bash
-# 1. Buat proyek di https://console.firebase.google.com
-#    Aktifkan: Authentication (provider: Google), Firestore Database
+File `android/app/google-services.json` dan `ios/Runner/GoogleService-Info.plist`
+ada di `.gitignore` — harus di-download dari Firebase Console.
 
-# 2. Pasang FlutterFire CLI
-dart pub global activate flutterfire_cli
+`lib/firebase_options.dart` sengaja di-commit karena berisi **public client config**
+(bukan secret). Firebase API keys di file ini bukan kunci server — keamanan data
+dijaga oleh Firebase Security Rules.
 
-# 3. Konfigurasi (ikuti instruksi interaktif)
-flutterfire configure
-# Menghasilkan: lib/firebase_options.dart, android/app/google-services.json,
-#               ios/Runner/GoogleService-Info.plist
+Lihat `docs/CONFIG_AND_SECRET_AUDIT.txt` untuk inventaris lengkap semua nilai
+konfigurasi, klasifikasi keamanannya, dan langkah-langkah yang disarankan.
 
-# 4. Aktifkan flag di lib/firebase_options.dart:
-#    const bool kFirebaseConfigured = false;
-#    →
-#    const bool kFirebaseConfigured = true;
+### Setup yang Diperlukan per Platform
 
-# 5. Jalankan ulang
-flutter run
-```
+| Platform | Yang Perlu Dikonfigurasi | File Terdampak |
+|---|---|---|
+| Android | Download `google-services.json` dari Firebase Console + daftarkan SHA-1 | `android/app/google-services.json` |
+| iOS | Download `GoogleService-Info.plist` dari Firebase Console | `ios/Runner/GoogleService-Info.plist` |
+| Web | Tambahkan `http://localhost` ke Authorized JavaScript Origins di Google Cloud Console | tidak ada perubahan kode |
 
-### Firestore Security Rules
+Template file platform tersedia di:
+- `android/app/google-services.example.json`
+- `ios/Runner/GoogleService-Info.example.plist`
+
+Panduan lengkap per platform ada di `docs/DEVELOPMENT_TO_DEPLOY.md §Firebase`.
+
+### Komponen yang Terlibat dalam Auth
+
+| File | Peran |
+|---|---|
+| `lib/core/services/auth_service.dart` | Business logic: guest sign-in, Google sign-in, sign-out, sesi |
+| `lib/presentation/providers/auth_provider.dart` | `AuthNotifier` — state auth + migrasi guest ke Google |
+| `lib/core/services/sync_service.dart` | Upload data ke Firestore (aktif hanya mode Google) |
+| `lib/firebase_options.dart` | Firebase credentials per platform |
+| `web/index.html` | Tag meta `google-signin-client_id` untuk GIS — berisi placeholder; inject nilai nyata via `scripts/inject_web_client_id.sh` sebelum run/build web |
+
+### Mengapa SyncService Menggunakan Lazy Reading
+
+`SyncService` membaca `userId` dan `authMode` langsung dari `SharedPreferences`
+setiap kali `isAvailable` diperiksa — bukan saat konstruksi. Ini penting karena:
+
+- Provider `syncServiceProvider` dibuat sekali dan di-cache Riverpod
+- Setelah Google Sign-In, SharedPreferences diupdate dengan userId baru
+- `SyncService.isAvailable` langsung `true` tanpa perlu recreate provider
+- Semua operasi tulis berikutnya otomatis ter-sync ke Firestore
+
+### Apa yang Terjadi Saat Firebase.initializeApp() Gagal
+
+Firebase diinisialisasi dengan timeout 10 detik. Jika gagal (jaringan putus, dll.):
+- App tetap berjalan penuh dalam mode lokal/tamu
+- Tombol Google Sign-In tetap muncul tapi akan gagal saat ditekan
+- Pesan error Bahasa Indonesia ditampilkan ke pengguna (bukan crash)
+
+### Keterbatasan Sinkronisasi (v1.0)
+
+- **Upload only**: data lokal dikirim ke Firestore setiap ada perubahan
+- **Cross-device restore**: belum diimplementasikan (planned v2.0)
+- **Sementara**: gunakan Ekspor/Impor CSV untuk pindah perangkat
+
+### Firestore Security Rules (wajib untuk produksi)
 
 ```javascript
 rules_version = '2';
@@ -908,15 +1300,6 @@ service cloud.firestore {
   }
 }
 ```
-
-### Apa yang Berubah Saat Firebase Aktif
-
-- `main.dart`: `Firebase.initializeApp()` dipanggil saat startup
-- `LoginScreen`: tombol Google Sign-In aktif (tidak disabled)
-- `AuthService.signInWithGoogle()`: melakukan OAuth nyata
-- `SyncService.isAvailable`: returns `true` untuk user Google
-- Setiap insert/update/delete di repository memanggil SyncService
-- Saat login Google → `SyncService.fetchAll()` mengunduh data dari Firestore
 
 ---
 
@@ -931,7 +1314,7 @@ Bagian ini menjawab pertanyaan: **"File mana memanggil siapa?"**
 ```
 main.dart
   └─ SharedPreferences.getInstance()              ← await sebelum runApp
-  └─ Firebase.initializeApp()                     ← jika kFirebaseConfigured
+  └─ Firebase.initializeApp()                     ← selalu, catch jika gagal
   └─ runApp(ProviderScope(overrides: [sharedPreferencesProvider]))
       └─ App() → MaterialApp.router → routerProvider → GoRouter
           └─ /splash → SplashScreen
@@ -1000,7 +1383,7 @@ PiutangFormScreen → Simpan
 ```
 Setiap operasi tulis repository (contoh: TransactionRepositoryImpl.insert)
   └─ ref.read(syncServiceProvider).upsertTransaction(tx)
-      └─ SyncService.isAvailable?   ← kFirebaseConfigured && _userId != null
+      └─ SyncService.isAvailable?   ← _userId != null && authMode == 'google'
           ├─ false → return (no-op, mode tamu atau Firebase belum aktif)
           └─ true → FirebaseFirestore
                     .collection('users').doc(_userId)
@@ -1164,4 +1547,4 @@ AppDatabase (singleton Drift)
 
 ---
 
-*Dokumen ini terakhir diperbarui: 17 April 2026*
+*Dokumen ini terakhir diperbarui: 26 April 2026 — Web Client ID: placeholder di web/index.html (inject via scripts/inject_web_client_id.sh), --dart-define untuk native*

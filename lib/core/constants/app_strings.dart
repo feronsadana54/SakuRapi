@@ -139,11 +139,31 @@ abstract final class AppStrings {
   static const String loginSubtitle = 'Pilih cara masuk yang kamu inginkan';
   static const String loginAsGuest = 'Masuk sebagai Tamu';
   static const String loginWithGoogle = 'Masuk dengan Google';
+  static const String loginWithEmail = 'Masuk dengan Email';
   static const String guestModeNote = 'Mode tamu: data tersimpan di perangkat ini saja';
   static const String googleSyncNote = 'Login Google: data disinkronkan ke cloud';
+  static const String emailLinkNote = 'Link masuk dikirim ke emailmu, tanpa kata sandi';
   static const String logoutTitle = 'Keluar dari Akun';
   static const String logoutConfirm = 'Apakah kamu yakin ingin keluar?';
   static const String logout = 'Keluar';
+
+  // ── Email Link Auth ───────────────────────────────────────────────────────
+  static const String emailInputLabel = 'Alamat Email';
+  static const String emailInputHint = 'contoh@email.com';
+  static const String sendEmailLink = 'Kirim Link Masuk';
+  static const String emailLinkSentTitle = 'Cek Emailmu!';
+  static const String emailLinkSentNote =
+      'Link berlaku selama 1 jam. Tidak menemukan email? Cek folder Spam.';
+  static const String emailLinkSentBack = 'Kembali ke Login';
+  static const String emailLinkError =
+      'Link masuk tidak valid atau sudah kedaluwarsa. Silakan coba lagi.';
+  static const String emailInvalid = 'Masukkan alamat email yang valid';
+
+  // ── Profil Pengguna ───────────────────────────────────────────────────────
+  static const String editDisplayName = 'Edit Nama Tampilan';
+  static const String displayNameHint = 'Nama yang ditampilkan di aplikasi';
+  static const String displayNameSaved = 'Nama berhasil diperbarui';
+  static const String displayNameEmpty = 'Nama tidak boleh kosong';
   static const String syncStatus = 'Status Sinkronisasi';
   static const String syncNow = 'Sinkronkan Sekarang';
   static const String dataBackedUp = 'Data tersimpan di cloud';

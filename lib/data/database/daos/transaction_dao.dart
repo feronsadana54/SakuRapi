@@ -40,6 +40,14 @@ class TransactionDao extends DatabaseAccessor<AppDatabase>
   Future<void> insertTransaction(TransactionsTableCompanion entry) =>
       into(transactionsTable).insert(entry);
 
+  /// Sisipkan transaksi hanya jika ID belum ada (untuk restore cloud).
+  Future<void> insertOrIgnore(TransactionsTableCompanion entry) =>
+      into(transactionsTable).insert(entry, mode: InsertMode.insertOrIgnore);
+
+  /// Timpa record yang sudah ada dengan data terbaru dari cloud (realtime sync).
+  Future<void> insertOrReplace(TransactionsTableCompanion entry) =>
+      into(transactionsTable).insert(entry, mode: InsertMode.insertOrReplace);
+
   Future<bool> updateTransaction(TransactionsTableCompanion entry) =>
       update(transactionsTable).replace(entry);
 

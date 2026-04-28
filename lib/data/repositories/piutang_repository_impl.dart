@@ -1,6 +1,9 @@
+import 'dart:async' show unawaited;
+
 import 'package:drift/drift.dart' show Value;
 import 'package:uuid/uuid.dart';
 
+import '../../core/services/sync_service.dart';
 import '../../domain/entities/hutang_entity.dart';
 import '../../domain/entities/piutang_entity.dart';
 import '../../domain/repositories/i_piutang_repository.dart';
@@ -9,8 +12,9 @@ import '../database/daos/piutang_dao.dart';
 
 class PiutangRepositoryImpl implements IPiutangRepository {
   final PiutangDao _dao;
+  final SyncService _sync;
 
-  PiutangRepositoryImpl(this._dao);
+  PiutangRepositoryImpl(this._dao, this._sync);
 
   @override
   Stream<List<PiutangEntity>> watchAll() =>
@@ -31,7 +35,7 @@ class PiutangRepositoryImpl implements IPiutangRepository {
   }
 
   @override
-  Future<void> insert(PiutangEntity piutang) {
+  Future<void> insert(PiutangEntity piutang) async {
     const uuid = Uuid();
     final now = DateTime.now().millisecondsSinceEpoch;
     final companion = PiutangTableCompanion.insert(
@@ -46,7 +50,8 @@ class PiutangRepositoryImpl implements IPiutangRepository {
       createdAt: piutang.createdAt.millisecondsSinceEpoch,
       updatedAt: now,
     );
-    return _dao.insertPiutang(companion);
+    await _dao.insertPiutang(companion);
+    unawaited(_sync.upsertPiutang(piutang));
   }
 
   @override
@@ -65,27 +70,40 @@ class PiutangRepositoryImpl implements IPiutangRepository {
       updatedAt: Value(now),
     );
     await _dao.updatePiutang(companion);
+    unawaited(_sync.upsertPiutang(piutang));
   }
 
   @override
   Future<void> delete(String id) async {
     await _dao.deletePaymentsForPiutang(id);
     await _dao.deletePiutang(id);
+    unawaited(_sync.deletePiutang(id));
   }
 
   @override
   Future<void> addPayment(String piutangId, PaymentRecord payment) async {
     const uuid = Uuid();
+    final id = payment.id.isEmpty ? uuid.v4() : payment.id;
+    final createdAt = DateTime.now().millisecondsSinceEpoch;
     final companion = PaymentHistoryTableCompanion.insert(
-      id: payment.id.isEmpty ? uuid.v4() : payment.id,
+      id: id,
       referenceId: piutangId,
       referenceType: 'piutang',
       amount: payment.amount,
       paidAt: payment.paidAt.millisecondsSinceEpoch,
       catatan: Value(payment.catatan),
-      createdAt: DateTime.now().millisecondsSinceEpoch,
+      createdAt: createdAt,
     );
     await _dao.insertPayment(companion);
+    unawaited(_sync.upsertPaymentRecord(
+      id: id,
+      referenceId: piutangId,
+      referenceType: 'piutang',
+      amount: payment.amount,
+      paidAt: payment.paidAt.millisecondsSinceEpoch,
+      catatan: payment.catatan,
+      createdAt: createdAt,
+    ));
   }
 
   // ── Mappers ──────────────────────────────────────────────────────────────

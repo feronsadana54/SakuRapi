@@ -26,7 +26,18 @@
       "Bash(dart pub *)",
       "Bash(powershell -Command \"Invoke-WebRequest -Uri 'https://github.com/simolus3/sqlite3.dart/releases/download/sqlite3-2.9.4/sqlite3.wasm' -OutFile 'D:/belajar-pemrograman/project-mandiri/aplikasi/project_ai_claude_apk_android_ios/web/sqlite3.wasm'\")",
       "Bash(flutter build *)",
-      "Bash(echo \"no docs dir\" ls D:/belajar-pemrograman/project-mandiri/aplikasi/project_ai_claude_apk_android_ios/*.md)"
+      "Bash(echo \"no docs dir\" ls D:/belajar-pemrograman/project-mandiri/aplikasi/project_ai_claude_apk_android_ios/*.md)",
+      "Bash(echo \"Exit: $?\")",
+      "Bash(echo \"dart check exit: $?\")",
+      "Bash(echo \"kts check exit: $?\")",
+      "Bash(keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android -keypass android)",
+      "Bash(python3 *)",
+      "Bash(sed -n '33,57p' \"D:/belajar-pemrograman/project-mandiri/aplicasi/project_ai_claude_apk_android_ios/web/index.html\")",
+      "Bash(sed -n '31,52p' \"D:/belajar-pemrograman/project-mandiri/aplicasi/project_ai_claude_apk_android_ios/lib/core/services/auth_service.dart\")",
+      "Bash(sed -n 33,57p D:/belajar-pemrograman/project-mandiri/aplikasi/project_ai_claude_apk_android_ios/web/index.html)",
+      "Bash(sed -n 31,52p D:/belajar-pemrograman/project-mandiri/aplikasi/project_ai_claude_apk_android_ios/lib/core/services/auth_service.dart)",
+      "Bash(node *)",
+      "Bash(xargs ls *)"
     ]
   }
 }

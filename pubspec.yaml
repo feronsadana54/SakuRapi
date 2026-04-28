@@ -52,6 +52,9 @@ dependencies:
   cloud_firestore: ^5.4.4
   google_sign_in: ^6.2.1
 
+  # Deep link — dibutuhkan untuk menangkap URI email sign-in link di Android/iOS
+  app_links: ^6.3.0
+
   # UI
   fl_chart: ^0.68.0
   google_fonts: ^6.2.1

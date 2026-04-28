@@ -16,6 +16,7 @@ import '../../../core/utils/date_utils.dart';
 import '../../../core/widgets/app_loading_indicator.dart';
 import '../../../core/widgets/empty_state_widget.dart';
 import '../../../domain/entities/transaction_entity.dart';
+import '../../../presentation/providers/auth_provider.dart';
 import '../../../presentation/providers/transaction_provider.dart';
 import '../../../presentation/widgets/transaction_tile.dart';
 import '../../../router/app_router.dart';
@@ -26,6 +27,9 @@ class HomeScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final summaryAsync = ref.watch(homeSummaryProvider);
+    final isSyncing = ref.watch(isBackgroundSyncingProvider);
+    final displayName = ref.watch(currentUserProvider).valueOrNull?.displayName
+        ?? AppStrings.appName;
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -36,7 +40,7 @@ class HomeScreen extends ConsumerWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              AppDateUtils.greeting(),
+              '${AppDateUtils.greeting()},',
               style: TextStyle(
                 fontSize: AppTypeScale.caption(context),
                 color: AppColors.textSecondary,
@@ -44,34 +48,83 @@ class HomeScreen extends ConsumerWidget {
               ),
             ),
             Text(
-              AppStrings.appName,
+              displayName,
               style: TextStyle(
                 fontSize: AppTypeScale.sectionTitle(context),
                 fontWeight: FontWeight.w700,
                 color: AppColors.textPrimary,
               ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
           ],
         ),
       ),
-      body: summaryAsync.when(
-        loading: () => const AppLoadingIndicator(),
-        error: (e, _) => Center(
-          child: Text(AppStrings.errorLoad,
-              style: const TextStyle(color: AppColors.expense)),
-        ),
-        data: (summary) => SafeArea(
-          child: ResponsiveContainer(
-            child: context.isTablet
-                ? _TabletLayout(summary: summary)
-                : _MobileLayout(summary: summary),
+      body: Column(
+        children: [
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 300),
+            child: isSyncing ? const _SyncBanner() : const SizedBox.shrink(),
           ),
-        ),
+          Expanded(
+            child: summaryAsync.when(
+              loading: () => const AppLoadingIndicator(),
+              error: (e, _) => Center(
+                child: Text(AppStrings.errorLoad,
+                    style: const TextStyle(color: AppColors.expense)),
+              ),
+              data: (summary) => SafeArea(
+                child: ResponsiveContainer(
+                  child: context.isTablet
+                      ? _TabletLayout(summary: summary)
+                      : _MobileLayout(summary: summary),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: () => context.push(AppRoutes.transactionAdd),
         tooltip: AppStrings.addTransaction,
         child: const Icon(Icons.add_rounded),
+      ),
+    );
+  }
+}
+
+// ── Sync Banner ───────────────────────────────────────────────────────────────
+
+class _SyncBanner extends StatelessWidget {
+  const _SyncBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      key: const ValueKey('sync_banner'),
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      color: AppColors.incomeLight,
+      child: Row(
+        children: [
+          const SizedBox(
+            width: 14,
+            height: 14,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: AppColors.income,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Text(
+            'Sedang memulihkan data dari cloud...',
+            style: TextStyle(
+              fontSize: AppTypeScale.caption(context),
+              color: AppColors.income,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
       ),
     );
   }

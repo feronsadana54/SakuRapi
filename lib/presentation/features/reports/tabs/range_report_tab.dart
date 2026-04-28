@@ -48,7 +48,7 @@ class RangeReportTab extends ConsumerWidget {
               final picked = await showDateRangePicker(
                 context: context,
                 firstDate: DateTime(2000),
-                lastDate: DateTime.now(),
+                lastDate: DateTime(2100),
                 initialDateRange: range,
                 locale: const Locale('id', 'ID'),
                 builder: (ctx, child) => Theme(

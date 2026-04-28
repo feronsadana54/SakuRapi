@@ -39,6 +39,20 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+
+            <!-- Deep link untuk Firebase Email Sign-In Link.
+                 android:autoVerify="true" → Android App Link (tidak ada dialog "buka dengan").
+                 Domain sakurapi-aa6ac.firebaseapp.com otomatis menyajikan assetlinks.json
+                 melalui Firebase Hosting sehingga verifikasi App Link berfungsi.
+                 Pastikan SHA-1 & SHA-256 sidik jari kunci sudah terdaftar di Firebase Console. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data
+                    android:scheme="https"
+                    android:host="sakurapi-aa6ac.firebaseapp.com"/>
+            </intent-filter>
         </activity>
 
         <!-- flutter_local_notifications: re-schedule on reboot -->

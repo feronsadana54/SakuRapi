@@ -28,6 +28,10 @@ class PiutangDao extends DatabaseAccessor<AppDatabase> with _$PiutangDaoMixin {
   Future<void> insertPiutang(PiutangTableCompanion entry) =>
       into(piutangTable).insert(entry);
 
+  /// Sisipkan piutang hanya jika ID belum ada — aman dari duplikasi saat restore.
+  Future<void> insertOrIgnore(PiutangTableCompanion entry) =>
+      into(piutangTable).insert(entry, mode: InsertMode.insertOrIgnore);
+
   Future<bool> updatePiutang(PiutangTableCompanion entry) =>
       update(piutangTable).replace(entry);
 
@@ -46,6 +50,11 @@ class PiutangDao extends DatabaseAccessor<AppDatabase> with _$PiutangDaoMixin {
 
   Future<void> insertPayment(PaymentHistoryTableCompanion entry) =>
       into(paymentHistoryTable).insert(entry);
+
+  /// Sisipkan record pembayaran hanya jika ID belum ada (untuk restore cloud).
+  Future<void> insertPaymentOrIgnore(PaymentHistoryTableCompanion entry) =>
+      into(paymentHistoryTable)
+          .insert(entry, mode: InsertMode.insertOrIgnore);
 
   Future<int> deletePaymentsForPiutang(String piutangId) =>
       (delete(paymentHistoryTable)

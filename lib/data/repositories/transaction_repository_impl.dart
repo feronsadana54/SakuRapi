@@ -1,6 +1,9 @@
+import 'dart:async' show unawaited;
+
 import 'package:drift/drift.dart' show Value;
 import 'package:uuid/uuid.dart';
 
+import '../../core/services/sync_service.dart';
 import '../../domain/entities/category_entity.dart';
 import '../../domain/entities/transaction_entity.dart';
 import '../../domain/enums/category_type.dart';
@@ -12,22 +15,16 @@ import '../database/daos/transaction_dao.dart';
 
 /// Implementasi konkret [ITransactionRepository] berbasis Drift SQLite.
 ///
-/// Alur data (baca):
-///   Provider UI mengawasi repo ini → DAO memancarkan stream query Drift →
-///   [_mapRows] memetakan category_id setiap baris ke [Category] lengkap →
-///   entitas domain [Transaction] dikembalikan.
-///
-/// Alur data (tulis):
-///   UI memanggil insert/update/delete → DAO menulis ke tabel `transactions` →
-///   Drift menginvalidasi stream query → [watchAll] memancar ulang → UI di-rebuild.
+/// Setiap operasi tulis juga memicu sinkronisasi ke Firestore via [SyncService]
+/// secara fire-and-forget (tidak memblokir UI). Jika sync gagal, data lokal
+/// SQLite tetap aman — sync dicoba lagi saat operasi berikutnya.
 class TransactionRepositoryImpl implements ITransactionRepository {
   final TransactionDao _txDao;
   final CategoryDao _catDao;
+  final SyncService _sync;
 
-  TransactionRepositoryImpl(this._txDao, this._catDao);
+  TransactionRepositoryImpl(this._txDao, this._catDao, this._sync);
 
-  /// Stream reaktif seluruh transaksi, diurutkan dari terbaru.
-  /// Drift secara otomatis memancar ulang setiap kali tabel `transactions` berubah.
   @override
   Stream<List<Transaction>> watchAll() => _txDao.watchAll().asyncMap(_mapRows);
 
@@ -53,7 +50,7 @@ class TransactionRepositoryImpl implements ITransactionRepository {
   }
 
   @override
-  Future<void> insert(Transaction transaction) {
+  Future<void> insert(Transaction transaction) async {
     const uuid = Uuid();
     final companion = TransactionsTableCompanion.insert(
       id: transaction.id.isEmpty ? uuid.v4() : transaction.id,
@@ -64,7 +61,8 @@ class TransactionRepositoryImpl implements ITransactionRepository {
       date: transaction.date.millisecondsSinceEpoch,
       createdAt: transaction.createdAt.millisecondsSinceEpoch,
     );
-    return _txDao.insertTransaction(companion);
+    await _txDao.insertTransaction(companion);
+    unawaited(_sync.upsertTransaction(transaction));
   }
 
   @override
@@ -79,18 +77,17 @@ class TransactionRepositoryImpl implements ITransactionRepository {
       createdAt: Value(transaction.createdAt.millisecondsSinceEpoch),
     );
     await _txDao.updateTransaction(companion);
+    unawaited(_sync.upsertTransaction(transaction));
   }
 
   @override
-  Future<void> delete(String id) async => _txDao.deleteTransaction(id);
+  Future<void> delete(String id) async {
+    await _txDao.deleteTransaction(id);
+    unawaited(_sync.deleteTransaction(id));
+  }
 
   // ── Mappers ──────────────────────────────────────────────────────────
 
-  /// Mengubah daftar baris Drift mentah menjadi entitas domain [Transaction].
-  ///
-  /// Mengambil semua kategori sekali per batch (1 panggilan DB tanpa peduli
-  /// jumlah baris) dan membangun map id→Category untuk pencarian O(1).
-  /// Baris yang category_id-nya tidak ada lagi difilter secara diam-diam (orphan guard).
   Future<List<Transaction>> _mapRows(List<TransactionData> rows) async {
     if (rows.isEmpty) return [];
     final catRows = await _catDao.getAll();

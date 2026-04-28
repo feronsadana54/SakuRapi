@@ -1,1 +1,1 @@
-enum AuthMode { guest, google }
+enum AuthMode { guest, google, emailLink }

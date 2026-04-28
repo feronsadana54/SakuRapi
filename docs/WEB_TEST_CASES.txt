@@ -1,0 +1,393 @@
+================================================================================
+  DOKUMENTASI WEB QA AUTOMATION — SakuRapi
+  Diperbarui: April 2026
+================================================================================
+
+--------------------------------------------------------------------------------
+1. TUJUAN
+--------------------------------------------------------------------------------
+
+Dokumen ini menjelaskan sistem pengujian otomatis (automation QA) yang dibuat
+khusus untuk target platform Web pada aplikasi Flutter SakuRapi.
+
+Tujuan utama:
+  - Memastikan seluruh alur fitur inti bekerja benar di browser (Chrome)
+  - Mendeteksi regresi setelah perubahan kode sebelum deploy
+  - Mendokumentasikan batasan pengujian web secara jujur
+  - Menyediakan laporan pengujian yang dapat diulang kapan saja
+
+Pengujian ini BUKAN pengganti pengujian manual di perangkat Android/iOS nyata.
+Pengujian ini melengkapi pengujian manual untuk mempercepat siklus verifikasi.
+
+--------------------------------------------------------------------------------
+2. RUANG LINGKUP PENGUJIAN
+--------------------------------------------------------------------------------
+
+TERMASUK (IN SCOPE):
+  - Rendering UI setiap layar utama
+  - Validasi form (input kosong, nilai tidak valid, batas karakter)
+  - Alur navigasi antar layar (bottom nav, tombol kembali, FAB)
+  - State kosong (empty state) dan state error
+  - Logika domain: perhitungan hutang, piutang, progress pembayaran
+  - Integrasi provider Riverpod dengan fake repository (in-memory)
+  - Format mata uang rupiah (Rp x.xxx)
+
+TIDAK TERMASUK (OUT OF SCOPE):
+  - Pengujian di perangkat Android/iOS fisik
+  - Notifikasi lokal (platform channel tidak tersedia di web)
+  - Google Sign-In nyata (memerlukan OAuth browser flow)
+  - Persistensi data ke SQLite (Drift/WASM tidak diinisialisasi di unit test)
+  - Sinkronisasi Firebase Firestore
+  - Ekspor/impor file CSV (file picker adalah platform channel)
+  - Kamera dan akses hardware
+
+--------------------------------------------------------------------------------
+3. PRINSIP UMUM PENGUJIAN
+--------------------------------------------------------------------------------
+
+A. ISOLASI PROVIDER
+   Setiap widget test menggunakan ProviderScope dengan overrides ke
+   FakeRepository (implementasi in-memory). Database nyata tidak pernah
+   disentuh dalam widget test.
+
+B. DETERMINISME
+   Fixture data didefinisikan di test/helpers/test_helpers.dart agar
+   setiap test menghasilkan output yang sama di semua mesin.
+
+C. KEJUJURAN BATASAN
+   Fitur yang bergantung pada platform channel (notifikasi, Google Sign-In,
+   file picker) diberi status LIMITED atau SKIPPED. Tidak ada tes palsu
+   yang pura-pura menguji fitur tersebut.
+
+D. TIDAK ADA MOCK JARINGAN
+   Tes tidak melakukan HTTP request nyata. Repository di-override dengan
+   implementasi in-memory sehingga tes tidak memerlukan koneksi internet.
+
+E. BAHASA UI
+   Semua label, pesan validasi, dan teks yang dicari di tes menggunakan
+   Bahasa Indonesia sesuai dengan AppStrings di kode produksi.
+
+--------------------------------------------------------------------------------
+4. FITUR YANG DIUJI (TESTED FEATURES)
+--------------------------------------------------------------------------------
+
+  ┌─────────────────────────────┬──────────────────┬─────────────────────────┐
+  │ Fitur                       │ Status           │ File Test               │
+  ├─────────────────────────────┼──────────────────┼─────────────────────────┤
+  │ Onboarding (3 halaman)      │ PENUH            │ onboarding_screen_test  │
+  │ Login layar (render)        │ PENUH            │ login_screen_test       │
+  │ Login tamu                  │ PENUH            │ login_screen_test       │
+  │ Google Sign-In              │ LIMITED          │ login_screen_test       │
+  │ Email Link Sign-In (kirim)  │ LIMITED          │ login_screen_test       │
+  │ Email Link Sign-In (selesai)│ SKIPPED          │ (memerlukan deep link)  │
+  │ Beranda (home)              │ PENUH            │ home_screen_test        │
+  │ Daftar transaksi terbaru    │ PENUH            │ home_screen_test        │
+  │ Form tambah transaksi       │ PENUH            │ transaction_form_test   │
+  │ Form edit transaksi         │ PENUH            │ transaction_form_test   │
+  │ Pembayaran hutang dari form │ PENUH            │ transaction_form_test   │
+  │ Form tambah hutang          │ PENUH            │ hutang_form_test        │
+  │ Form edit hutang            │ PENUH            │ hutang_form_test        │
+  │ Form tambah piutang         │ PENUH            │ piutang_form_test       │
+  │ Form edit piutang           │ PENUH            │ piutang_form_test       │
+  │ Layar laporan (7 tab)       │ PENUH            │ reports_screen_test     │
+  │ Navigasi bottom bar         │ PENUH            │ integration test        │
+  │ Alur install pertama kali   │ PENUH            │ integration test        │
+  │ Notifikasi harian           │ SKIPPED          │ (tidak bisa di web)     │
+  │ Ekspor/Impor CSV            │ SKIPPED          │ (file picker di web)    │
+  │ Sinkronisasi cloud          │ SKIPPED          │ (memerlukan Firebase)   │
+  │ Realtime sync multi-device  │ SKIPPED          │ (memerlukan 2 device)   │
+  └─────────────────────────────┴──────────────────┴─────────────────────────┘
+
+--------------------------------------------------------------------------------
+5. FITUR YANG TIDAK BISA DIUJI PENUH DI WEB
+--------------------------------------------------------------------------------
+
+A. GOOGLE SIGN-IN (LIMITED)
+   Alasan: GoogleSignIn.signIn() melempar MissingPluginException di lingkungan
+   test karena tidak ada platform channel yang terdaftar.
+   Yang diuji: apakah dialog error ditampilkan (bukan crash aplikasi).
+   Yang tidak diuji: alur OAuth, penerimaan token, simpan ke SharedPreferences.
+
+B. NOTIFIKASI LOKAL (SKIPPED)
+   Alasan: flutter_local_notifications menggunakan platform channel Android/iOS.
+   Di web, plugin tidak tersedia sama sekali.
+   Yang diuji: -
+   Yang tidak diuji: penjadwalan, pengiriman, klik notifikasi.
+
+C. EKSPOR/IMPOR CSV (SKIPPED)
+   Alasan: share_plus dan file_picker adalah platform channel.
+   Yang diuji: -
+   Yang tidak diuji: pembuatan file, dialog berbagi, parsing CSV impor.
+
+D. DATABASE DRIFT NYATA (LIMITED)
+   Alasan: Drift/SQLite dengan WASM memerlukan inisialisasi khusus yang
+   tidak tersedia di flutter test environment.
+   Yang diuji: operasi CRUD lewat FakeRepository in-memory.
+   Yang tidak diuji: migrasi schema, query SQL nyata, persistensi antar sesi.
+
+E. FIREBASE FIRESTORE SYNC (SKIPPED)
+   Alasan: memerlukan emulator Firebase atau koneksi internet nyata.
+   Yang diuji: -
+   Yang tidak diuji: push data, pull data, conflict resolution.
+
+F. EMAIL LINK SIGN-IN — PENYELESAIAN (SKIPPED)
+   Alasan: langkah "klik link di email" memerlukan deep link Android (app_links) atau
+   redirect browser nyata. Tidak bisa disimulasikan di unit/widget test.
+   Yang diuji: validasi form email, tampilan layar "link terkirim".
+   Yang tidak diuji: alur klik link → buka app → sign-in selesai.
+
+G. REALTIME MULTI-DEVICE SYNC (SKIPPED)
+   Alasan: memerlukan dua perangkat fisik / emulator yang login akun yang sama,
+   koneksi Firestore nyata, dan Firebase project yang sudah dikonfigurasi.
+   Yang diuji: -
+   Yang tidak diuji: propagasi perubahan Device A ke Device B, conflict resolution,
+   perilaku listener saat offline/online.
+
+--------------------------------------------------------------------------------
+6. DAFTAR POSITIVE CASE (HAPPY PATH)
+--------------------------------------------------------------------------------
+
+ONBOARDING:
+  [OB-P1] Halaman 1 menampilkan judul dan deskripsi
+  [OB-P2] Tombol Lanjut berpindah dari halaman 1 ke halaman 2
+  [OB-P3] Halaman 2 menampilkan judul dan deskripsi yang berbeda
+  [OB-P4] Input hari gajian menerima nilai 25 (default)
+  [OB-P5] Input hari gajian menerima nilai valid 1-31
+
+LOGIN:
+  [LG-P1] Layar login menampilkan nama aplikasi 'SakuRapi'
+  [LG-P2] Tombol 'Masuk sebagai Tamu' tersedia
+  [LG-P3] Tombol 'Masuk dengan Google' tersedia
+  [LG-P4] Tap 'Masuk sebagai Tamu' berhasil navigasi ke beranda
+
+BERANDA:
+  [HM-P1] Layar beranda render tanpa error
+  [HM-P2] Label Pemasukan dan Pengeluaran ditampilkan
+  [HM-P3] Transaksi dari provider ditampilkan di daftar
+  [HM-P4] Tombol FAB (+) tersedia untuk tambah transaksi
+
+FORM TRANSAKSI:
+  [TF-P1] Form terbuka dengan tab Pengeluaran aktif
+  [TF-P2] Tab dapat beralih antara Pemasukan dan Pengeluaran
+  [TF-P3] Field jumlah, kategori, catatan, tanggal ditampilkan
+  [TF-P4] Preview format rupiah muncul saat mengetik jumlah
+  [TF-P5] Kategori dapat dipilih dari dropdown
+
+FORM HUTANG:
+  [HT-P1] Form menampilkan semua label field yang diperlukan
+  [HT-P2] Mode edit menampilkan data yang sudah ada (pre-filled)
+
+FORM PIUTANG:
+  [PT-P1] Form menampilkan semua label field yang diperlukan
+  [PT-P2] Mode edit menampilkan data yang sudah ada (pre-filled)
+
+LAPORAN:
+  [LP-P1] Layar laporan menampilkan 7 tab (Harian, Bulanan, Tahunan,
+          Rentang, Siklus Gaji, Hutang/Piutang, Grafik)
+  [LP-P2] Tap tab berpindah ke konten yang sesuai
+  [LP-P3] Label Total Pemasukan, Total Pengeluaran, Saldo Bersih muncul
+
+NAVIGASI INTEGRASI:
+  [NV-P1] Alur install pertama kali: onboarding → login → beranda
+  [NV-P2] Bottom nav item Transaksi dapat diklik
+  [NV-P3] Bottom nav item Laporan dapat diklik
+  [NV-P4] Bottom nav item Pengaturan dapat diklik
+  [NV-P5] FAB di beranda membuka form tambah transaksi
+
+--------------------------------------------------------------------------------
+7. DAFTAR NEGATIVE CASE DAN VALIDATION CASE
+--------------------------------------------------------------------------------
+
+ONBOARDING VALIDATION:
+  [OB-V1] Input hari gajian = 0 menampilkan pesan error validasi
+  [OB-V2] Input hari gajian = 32 menampilkan pesan error validasi
+  [OB-V3] Input hari gajian = 15 TIDAK menampilkan error (valid)
+
+LOGIN NEGATIVE:
+  [LG-N1] Tap 'Masuk dengan Google' tidak menyebabkan crash aplikasi
+  [LG-N2] Saat Google Sign-In gagal, dialog error ditampilkan
+          (bukan SnackBar yang terpotong)
+  [LG-N3] Tap 'Masuk dengan Email' tidak menyebabkan crash aplikasi
+  [LG-N4] Submit form Email Link dengan alamat kosong menampilkan error validasi
+  [LG-N5] Submit form Email Link dengan format email tidak valid menampilkan error
+
+FORM TRANSAKSI VALIDATION:
+  [TF-V1] Submit form dengan jumlah kosong menampilkan
+          'Jumlah tidak boleh kosong'
+  [TF-V2] Submit form dengan jumlah = 0 menampilkan
+          'Jumlah harus lebih dari 0'
+  [TF-V3] Submit form tanpa pilih kategori menampilkan SnackBar error
+  [TF-V4] Pilih kategori 'Pembayaran Hutang' tanpa ada hutang aktif
+          menampilkan pesan 'Belum ada data hutang yang bisa dibayar'
+  [TF-V5] Input jumlah bayar melebihi sisa hutang menampilkan error
+          'Jumlah melebihi sisa hutang'
+
+FORM HUTANG VALIDATION:
+  [HT-V1] Submit form hutang dengan nama kreditur kosong menampilkan
+          pesan 'Nama harus diisi' (atau serupa)
+  [HT-V2] Submit form hutang dengan jumlah kosong menampilkan
+          'Jumlah tidak boleh kosong'
+  [HT-V3] Submit form hutang dengan jumlah = 0 menampilkan
+          'Jumlah harus lebih dari 0'
+
+FORM PIUTANG VALIDATION:
+  [PT-V1] Submit form piutang dengan nama peminjam kosong menampilkan error
+  [PT-V2] Submit form piutang dengan jumlah kosong menampilkan error
+  [PT-V3] Submit form piutang dengan jumlah = 0 menampilkan error
+
+BERANDA STATE:
+  [HM-N1] Saat tidak ada transaksi, empty state ditampilkan
+  [HM-N2] Saat provider melempar error, error state ditampilkan
+
+LAPORAN STATE:
+  [LP-N1] Saat tidak ada data transaksi, empty state per-tab ditampilkan
+
+--------------------------------------------------------------------------------
+8. PEMETAAN FILE TEST KE FITUR
+--------------------------------------------------------------------------------
+
+  test/helpers/test_helpers.dart
+    → Bukan test — shared infrastructure: fixtures, fake repos, helper widgets
+
+  test/widget/login_screen_test.dart
+    → Fitur: login layar render, tamu login, Google Sign-In error dialog
+
+  test/widget/home_screen_test.dart
+    → Fitur: beranda render, daftar transaksi terbaru, empty/error state, FAB
+
+  test/widget/transaction_form_test.dart
+    → Fitur: form transaksi, validasi, toggle tipe, hutang picker,
+             validasi jumlah bayar hutang, preview rupiah
+
+  test/widget/hutang_form_test.dart
+    → Fitur: form hutang, validasi semua field, mode edit
+
+  test/widget/piutang_form_test.dart
+    → Fitur: form piutang, validasi semua field, mode edit
+
+  test/widget/reports_screen_test.dart
+    → Fitur: laporan 7 tab, navigasi tab, label ringkasan, empty state
+
+  test/widget/onboarding_screen_test.dart
+    → Fitur: onboarding 3 halaman, navigasi, input hari gajian, validasi
+
+  integration_test/web_flow_test.dart
+    → Fitur: alur lengkap install pertama kali, navigasi bottom bar,
+             FAB ke form, onboarding → login → beranda
+
+  test/unit/usecases/hutang_payment_integration_test.dart
+    → Fitur: logika domain hutang (perhitungan sisa, status lunas,
+             progressPersen, riwayat pembayaran, validasi)
+
+--------------------------------------------------------------------------------
+9. URUTAN TES YANG DIJALANKAN SCRIPT
+--------------------------------------------------------------------------------
+
+Script: scripts/run_web_qa.sh
+
+Langkah 1 — Persiapan
+  Periksa dependensi: flutter, dart, google-chrome / chromium
+  Buat direktori reports/web_qa/ jika belum ada
+  Buat file log dengan timestamp
+
+Langkah 2 — Analisis Statis
+  flutter analyze
+  Tujuan: tangkap type error, import rusak, warning sebelum menjalankan tes
+
+Langkah 3 — Unit Test (non-UI)
+  flutter test test/unit/
+  Tujuan: verifikasi logika domain (kalkulasi hutang, piutang) secepat mungkin
+
+Langkah 4 — Widget Test (semua)
+  flutter test test/widget/ --platform chrome
+  Tujuan: verifikasi UI render, validasi form, navigasi
+
+Langkah 5 — Test Helper Verify
+  flutter test test/helpers/ --platform chrome (jika ada test di sana)
+  Tujuan: pastikan fake repository berfungsi benar
+
+Langkah 6 — Integration Test (web)
+  flutter test integration_test/web_flow_test.dart -d chrome
+  Memerlukan: ChromeDriver berjalan di port 4444
+  Tujuan: verifikasi alur end-to-end di browser
+
+Langkah 7 — Ringkasan
+  Hitung: jumlah PASS, FAIL, SKIPPED
+  Tampilkan: total waktu, status akhir (LULUS / GAGAL)
+  Simpan: semua output ke reports/web_qa/qa_<timestamp>.log
+
+Langkah 8 — Exit Code
+  0 = semua tes lulus
+  1 = ada tes yang gagal (CI pipeline akan berhenti)
+
+--------------------------------------------------------------------------------
+10. ARTI STATUS TES
+--------------------------------------------------------------------------------
+
+  PASS
+    Tes berhasil. Fitur berperilaku sesuai harapan di browser.
+    Semua assertion terpenuhi. Tidak ada exception yang tidak ditangani.
+
+  FAIL
+    Tes gagal. Ada yang berubah dari perilaku yang diharapkan.
+    Cek output di reports/web_qa/qa_<timestamp>.log untuk detail.
+    Harus diperbaiki sebelum merge ke branch main.
+
+  SKIPPED
+    Tes sengaja dilewati karena fitur tidak dapat diuji di lingkungan ini.
+    Biasanya karena ketergantungan platform channel (Android/iOS only).
+    Status SKIPPED bukan kegagalan — ini keputusan desain yang disengaja.
+    Fitur SKIPPED harus diuji manual di perangkat fisik.
+
+  LIMITED
+    Tes berjalan tapi hanya menguji sebagian dari fitur.
+    Contoh: Google Sign-In — hanya menguji bahwa dialog error muncul,
+    bukan alur autentikasi penuh.
+    Perlunya pengujian manual tambahan untuk bagian yang LIMITED.
+
+  ERROR
+    Test runner sendiri gagal (bukan assertion tes yang gagal).
+    Kemungkinan sebab: ChromeDriver tidak berjalan, dependensi hilang,
+    kompilasi gagal, atau port konflik.
+    Periksa: apakah ChromeDriver aktif? Apakah flutter build web berhasil?
+
+--------------------------------------------------------------------------------
+11. CARA MENJALANKAN
+--------------------------------------------------------------------------------
+
+Prasyarat:
+  - Flutter SDK terinstall dan di PATH
+  - Google Chrome terinstall
+  - ChromeDriver (versi sama dengan Chrome) untuk integration test
+
+Jalankan semua tes web:
+  bash scripts/run_web_qa.sh
+
+Jalankan hanya widget test:
+  flutter test test/widget/ --platform chrome
+
+Jalankan hanya unit test:
+  flutter test test/unit/
+
+Jalankan hanya integration test (ChromeDriver harus berjalan dulu):
+  chromedriver --port=4444 &
+  flutter test integration_test/web_flow_test.dart -d chrome
+
+Lihat laporan terakhir:
+  cat reports/web_qa/qa_<timestamp>.log
+
+--------------------------------------------------------------------------------
+12. CATATAN UNTUK PENGEMBANG SELANJUTNYA
+--------------------------------------------------------------------------------
+
+- Jika menambah fitur baru, tambahkan test di file yang relevan
+  ATAU buat file baru di test/widget/
+- Daftarkan test case baru di dokumen ini (bagian 6 atau 7)
+- Jangan hapus tes yang SKIPPED — tes tersebut mendokumentasikan batasan nyata
+- Untuk fitur yang menggunakan platform channel baru, tambahkan ke bagian 5
+- Fixture data ada di test/helpers/test_helpers.dart — update jika schema berubah
+- Jika schema database (Drift) berubah, FakeRepository mungkin perlu diperbarui
+
+================================================================================
+  Akhir dokumen — SakuRapi Web QA Automation
+================================================================================

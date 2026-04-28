@@ -45,6 +45,13 @@ class SettingsScreen extends ConsumerWidget {
                 _AccountCard(
                   userAsync: userAsync,
                   onLogout: () => _confirmLogout(context, ref),
+                  onEndGuestSession: () =>
+                      _confirmEndGuestSession(context, ref),
+                  onUpgradeToGoogle: () => _upgradeToGoogle(context, ref),
+                  onUpgradeToEmailLink: () =>
+                      context.push(AppRoutes.emailLink),
+                  onEditDisplayName: (name) =>
+                      _updateDisplayName(context, ref, name),
                 ),
                 SizedBox(height: AppSpacing.cardGap(context)),
 
@@ -145,6 +152,120 @@ class SettingsScreen extends ConsumerWidget {
     if (confirmed != true || !context.mounted) return;
     await ref.read(currentUserProvider.notifier).signOut();
     if (context.mounted) context.go(AppRoutes.login);
+  }
+
+  // ── Akhiri Sesi Tamu ──────────────────────────────────────────────────────
+
+  Future<void> _confirmEndGuestSession(
+      BuildContext context, WidgetRef ref) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Akhiri Sesi Tamu?'),
+        content: const Text(
+          'Kamu akan kembali ke layar login. '
+          'Data lokal di perangkat ini tetap tersimpan — kamu bisa melanjutkan '
+          'sebagai tamu kapan saja dengan login ulang.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text(AppStrings.cancel),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: AppColors.expense),
+            child: const Text('Akhiri Sesi'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+    await ref.read(currentUserProvider.notifier).signOut();
+    if (context.mounted) context.go(AppRoutes.login);
+  }
+
+  // ── Upgrade Tamu ke Google ────────────────────────────────────────────────
+
+  Future<void> _upgradeToGoogle(BuildContext context, WidgetRef ref) async {
+    try {
+      final success =
+          await ref.read(currentUserProvider.notifier).upgradeGuestToGoogle();
+      if (!context.mounted) return;
+      if (success) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+                'Login Google berhasil! Data kamu sudah disinkronkan ke cloud.'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+      // success == false berarti pengguna membatalkan dialog akun — tidak perlu feedback
+    } catch (e) {
+      if (!context.mounted) return;
+      final msg = _googleErrorMessage(e.toString());
+      showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Row(
+            children: [
+              Icon(Icons.error_outline_rounded,
+                  color: AppColors.expense, size: 22),
+              SizedBox(width: 8),
+              Text('Login Gagal',
+                  style:
+                      TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+            ],
+          ),
+          content: Text(msg),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Tutup'),
+            ),
+          ],
+        ),
+      );
+    }
+  }
+
+  // ── Perbarui nama tampilan ────────────────────────────────────────────────
+
+  Future<void> _updateDisplayName(
+      BuildContext context, WidgetRef ref, String name) async {
+    await ref.read(currentUserProvider.notifier).updateDisplayName(name);
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text(AppStrings.displayNameSaved),
+        behavior: SnackBarBehavior.floating,
+        duration: Duration(seconds: 2),
+      ));
+    }
+  }
+
+  String _googleErrorMessage(String raw) {
+    final lower = raw.toLowerCase();
+    if (lower.contains('network_error') ||
+        lower.contains('network-request-failed')) {
+      return 'Tidak ada koneksi internet. Coba lagi setelah terhubung ke jaringan.';
+    }
+    if (lower.contains('sign_in_failed') ||
+        lower.contains('apiexception: 10') ||
+        lower.contains('developer_error') ||
+        lower.contains('idtoken')) {
+      return 'Login Google belum siap. Periksa konfigurasi SHA-1 (Android) atau '
+          'Client ID (web) di Firebase Console.';
+    }
+    if (lower.contains('popup_closed') ||
+        lower.contains('sign_in_cancelled') ||
+        lower.contains('canceled') ||
+        lower.contains('cancelled')) {
+      return 'Login dibatalkan.';
+    }
+    return 'Login Google gagal. Coba lagi atau gunakan mode tamu.';
   }
 
   // ── Export ────────────────────────────────────────────────────────────────
@@ -283,20 +404,80 @@ class SettingsScreen extends ConsumerWidget {
 
 // ── Account card ─────────────────────────────────────────────────────────────
 
-class _AccountCard extends StatelessWidget {
+class _AccountCard extends StatefulWidget {
   final AsyncValue<dynamic> userAsync;
   final VoidCallback onLogout;
+  final VoidCallback onEndGuestSession;
+  final Future<void> Function() onUpgradeToGoogle;
+  final VoidCallback onUpgradeToEmailLink;
+  final Future<void> Function(String) onEditDisplayName;
 
-  const _AccountCard({required this.userAsync, required this.onLogout});
+  const _AccountCard({
+    required this.userAsync,
+    required this.onLogout,
+    required this.onEndGuestSession,
+    required this.onUpgradeToGoogle,
+    required this.onUpgradeToEmailLink,
+    required this.onEditDisplayName,
+  });
+
+  @override
+  State<_AccountCard> createState() => _AccountCardState();
+}
+
+class _AccountCardState extends State<_AccountCard> {
+  bool _isUpgrading = false;
+
+  Future<void> _handleUpgradeGoogle() async {
+    setState(() => _isUpgrading = true);
+    try {
+      await widget.onUpgradeToGoogle();
+    } finally {
+      if (mounted) setState(() => _isUpgrading = false);
+    }
+  }
+
+  void _showEditNameDialog(BuildContext context, String currentName) {
+    final ctrl = TextEditingController(text: currentName);
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text(AppStrings.editDisplayName),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          textCapitalization: TextCapitalization.words,
+          decoration: const InputDecoration(
+              hintText: AppStrings.displayNameHint),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text(AppStrings.cancel),
+          ),
+          TextButton(
+            onPressed: () async {
+              final name = ctrl.text.trim();
+              if (name.isEmpty) return;
+              Navigator.pop(ctx);
+              await widget.onEditDisplayName(name);
+            },
+            child: const Text(AppStrings.save),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    return userAsync.when(
+    return widget.userAsync.when(
       loading: () => const _SettingsCard(children: [
         ListTile(
           leading: CircleAvatar(
             backgroundColor: AppColors.surfaceVariant,
-            child: Icon(Icons.person_outline_rounded, color: AppColors.textSecondary),
+            child: Icon(Icons.person_outline_rounded,
+                color: AppColors.textSecondary),
           ),
           title: Text('Memuat...'),
         ),
@@ -304,82 +485,259 @@ class _AccountCard extends StatelessWidget {
       error: (e, st) => const SizedBox.shrink(),
       data: (user) {
         if (user == null) return const SizedBox.shrink();
-        final isGuest = user.authMode == AuthMode.guest;
-        final authIcon = isGuest ? Icons.person_outline_rounded : Icons.g_mobiledata_rounded;
-        final authLabel = isGuest ? AppStrings.loginAsGuest : 'Google';
-        final authColor = isGuest ? AppColors.textSecondary : AppColors.primary;
-        final syncText = isGuest ? AppStrings.dataLocalOnly : AppStrings.dataBackedUp;
-        final syncIcon = isGuest ? Icons.phone_android_rounded : Icons.cloud_done_rounded;
-        final syncColor = isGuest ? AppColors.textSecondary : AppColors.income;
+        final authMode = user.authMode as AuthMode;
+        if (authMode == AuthMode.guest) return _buildGuestCard(context);
+        final icon = authMode == AuthMode.emailLink
+            ? Icons.mail_rounded
+            : Icons.account_circle_rounded;
+        return _buildAuthCard(context, user, icon: icon);
+      },
+    );
+  }
 
-        return _SettingsCard(children: [
-          ListTile(
-            leading: CircleAvatar(
-              backgroundColor: isGuest ? AppColors.surfaceVariant : AppColors.primaryLight,
-              child: Icon(
-                authIcon,
-                color: authColor,
-              ),
-            ),
-            title: Text(
-              user.displayName,
+  /// Kartu untuk pengguna tamu — menawarkan upgrade ke Google atau Email Link.
+  Widget _buildGuestCard(BuildContext context) {
+    return _SettingsCard(children: [
+      // ── Info tamu ──────────────────────────────────────────────────
+      ListTile(
+        leading: const CircleAvatar(
+          backgroundColor: AppColors.surfaceVariant,
+          child: Icon(Icons.person_outline_rounded,
+              color: AppColors.textSecondary),
+        ),
+        title: Text(
+          'Mode Tamu',
+          style: TextStyle(
+            fontSize: AppTypeScale.bodyText(context),
+            fontWeight: FontWeight.w600,
+            color: AppColors.textPrimary,
+          ),
+        ),
+        subtitle: Row(
+          children: [
+            const Icon(Icons.phone_android_rounded,
+                size: 13, color: AppColors.textSecondary),
+            const SizedBox(width: 4),
+            Text(
+              AppStrings.dataLocalOnly,
               style: TextStyle(
-                fontSize: AppTypeScale.bodyText(context),
-                fontWeight: FontWeight.w600,
-                color: AppColors.textPrimary,
+                fontSize: AppTypeScale.caption(context),
+                color: AppColors.textSecondary,
               ),
             ),
-            subtitle: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          ],
+        ),
+      ),
+
+      // ── Ajakan upgrade ──────────────────────────────────────────────
+      const Divider(height: 1, indent: 16, endIndent: 16),
+      Container(
+        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: AppColors.primaryContainer,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+              color: AppColors.primary.withValues(alpha: 0.25), width: 1),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
               children: [
-                const SizedBox(height: 2),
-                Row(
-                  children: [
-                    Icon(authIcon, size: 13, color: authColor),
-                    const SizedBox(width: 4),
-                    Text(
-                      authLabel,
-                      style: TextStyle(
-                        fontSize: AppTypeScale.caption(context),
-                        color: authColor,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 2),
-                Row(
-                  children: [
-                    Icon(syncIcon, size: 13, color: syncColor),
-                    const SizedBox(width: 4),
-                    Text(
-                      syncText,
-                      style: TextStyle(
-                        fontSize: AppTypeScale.caption(context),
-                        color: syncColor,
-                      ),
-                    ),
-                  ],
+                const Icon(Icons.cloud_upload_outlined,
+                    size: 16, color: AppColors.primary),
+                const SizedBox(width: 8),
+                Text(
+                  'Simpan data ke cloud',
+                  style: TextStyle(
+                    fontSize: AppTypeScale.bodyText(context),
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.primary,
+                  ),
                 ),
               ],
             ),
-            isThreeLine: true,
-          ),
-          const Divider(height: 1, indent: 16, endIndent: 16),
-          ListTile(
-            leading: const Icon(Icons.logout_rounded, color: AppColors.expense),
-            title: Text(
-              AppStrings.logout,
+            const SizedBox(height: 4),
+            Text(
+              'Login dengan Google atau Email untuk mencadangkan datamu '
+              'dan mengaksesnya dari perangkat lain.',
               style: TextStyle(
-                fontSize: AppTypeScale.bodyText(context),
-                color: AppColors.expense,
+                fontSize: AppTypeScale.caption(context),
+                color: AppColors.textSecondary,
+                height: 1.4,
               ),
             ),
-            onTap: onLogout,
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: _isUpgrading ? null : _handleUpgradeGoogle,
+                    icon: _isUpgrading
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.white),
+                          )
+                        : const Icon(Icons.account_circle_outlined, size: 16),
+                    label: Text(
+                      _isUpgrading ? 'Memproses...' : 'Google',
+                      style: TextStyle(
+                          fontSize: AppTypeScale.caption(context)),
+                    ),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8)),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _isUpgrading
+                        ? null
+                        : widget.onUpgradeToEmailLink,
+                    icon: const Icon(Icons.mail_outline_rounded, size: 16),
+                    label: Text(
+                      'Email',
+                      style: TextStyle(
+                          fontSize: AppTypeScale.caption(context)),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8)),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+
+      // ── Akhiri sesi tamu ────────────────────────────────────────────
+      const Divider(height: 1, indent: 16, endIndent: 16),
+      ListTile(
+        leading: const Icon(Icons.exit_to_app_rounded,
+            color: AppColors.textSecondary),
+        title: Text(
+          'Akhiri Sesi Tamu',
+          style: TextStyle(
+            fontSize: AppTypeScale.bodyText(context),
+            color: AppColors.textSecondary,
           ),
-        ]);
-      },
-    );
+        ),
+        subtitle: Text(
+          'Kembali ke layar login. Data lokal tetap tersimpan.',
+          style: TextStyle(
+            fontSize: AppTypeScale.caption(context),
+            color: AppColors.textSecondary,
+          ),
+        ),
+        onTap: widget.onEndGuestSession,
+      ),
+    ]);
+  }
+
+  /// Kartu untuk pengguna Google atau Email Link.
+  Widget _buildAuthCard(
+    BuildContext context,
+    dynamic user, {
+    required IconData icon,
+  }) {
+    return _SettingsCard(children: [
+      // ── Info akun ───────────────────────────────────────────────────
+      ListTile(
+        leading: CircleAvatar(
+          backgroundColor: AppColors.primaryLight,
+          child: Icon(icon, color: AppColors.primary, size: 26),
+        ),
+        title: Text(
+          user.displayName ?? 'Pengguna',
+          style: TextStyle(
+            fontSize: AppTypeScale.bodyText(context),
+            fontWeight: FontWeight.w600,
+            color: AppColors.textPrimary,
+          ),
+        ),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (user.email != null) ...[
+              const SizedBox(height: 2),
+              Text(
+                user.email!,
+                style: TextStyle(
+                  fontSize: AppTypeScale.caption(context),
+                  color: AppColors.textSecondary,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+            const SizedBox(height: 2),
+            Row(
+              children: [
+                const Icon(Icons.cloud_done_rounded,
+                    size: 13, color: AppColors.income),
+                const SizedBox(width: 4),
+                Text(
+                  AppStrings.dataBackedUp,
+                  style: TextStyle(
+                    fontSize: AppTypeScale.caption(context),
+                    color: AppColors.income,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+        isThreeLine: user.email != null,
+      ),
+
+      // ── Edit nama ───────────────────────────────────────────────────
+      const Divider(height: 1, indent: 16, endIndent: 16),
+      ListTile(
+        leading:
+            const Icon(Icons.edit_rounded, color: AppColors.primary),
+        title: Text(
+          AppStrings.editDisplayName,
+          style: TextStyle(fontSize: AppTypeScale.bodyText(context)),
+        ),
+        trailing: const Icon(Icons.chevron_right_rounded,
+            color: AppColors.textSecondary),
+        onTap: () =>
+            _showEditNameDialog(context, user.displayName ?? ''),
+      ),
+
+      // ── Tombol Keluar ───────────────────────────────────────────────
+      const Divider(height: 1, indent: 16, endIndent: 16),
+      ListTile(
+        leading:
+            const Icon(Icons.logout_rounded, color: AppColors.expense),
+        title: Text(
+          AppStrings.logout,
+          style: TextStyle(
+            fontSize: AppTypeScale.bodyText(context),
+            color: AppColors.expense,
+          ),
+        ),
+        subtitle: Text(
+          'Akun dan data cloud tetap tersimpan.',
+          style: TextStyle(
+            fontSize: AppTypeScale.caption(context),
+            color: AppColors.textSecondary,
+          ),
+        ),
+        onTap: widget.onLogout,
+      ),
+    ]);
   }
 }
 

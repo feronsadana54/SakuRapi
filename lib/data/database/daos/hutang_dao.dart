@@ -28,6 +28,10 @@ class HutangDao extends DatabaseAccessor<AppDatabase> with _$HutangDaoMixin {
   Future<void> insertHutang(HutangTableCompanion entry) =>
       into(hutangTable).insert(entry);
 
+  /// Sisipkan hutang hanya jika ID belum ada — aman dari duplikasi saat restore.
+  Future<void> insertOrIgnore(HutangTableCompanion entry) =>
+      into(hutangTable).insert(entry, mode: InsertMode.insertOrIgnore);
+
   Future<bool> updateHutang(HutangTableCompanion entry) =>
       update(hutangTable).replace(entry);
 
@@ -46,6 +50,14 @@ class HutangDao extends DatabaseAccessor<AppDatabase> with _$HutangDaoMixin {
 
   Future<void> insertPayment(PaymentHistoryTableCompanion entry) =>
       into(paymentHistoryTable).insert(entry);
+
+  /// Sisipkan record pembayaran hanya jika ID belum ada (untuk restore cloud).
+  Future<void> insertPaymentOrIgnore(PaymentHistoryTableCompanion entry) =>
+      into(paymentHistoryTable).insert(entry, mode: InsertMode.insertOrIgnore);
+
+  /// Hapus satu record pembayaran berdasarkan ID-nya (untuk realtime sync deletion).
+  Future<int> deletePayment(String paymentId) =>
+      (delete(paymentHistoryTable)..where((t) => t.id.equals(paymentId))).go();
 
   Future<int> deletePaymentsForHutang(String hutangId) =>
       (delete(paymentHistoryTable)

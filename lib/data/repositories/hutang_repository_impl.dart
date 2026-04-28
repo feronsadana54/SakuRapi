@@ -1,6 +1,9 @@
+import 'dart:async' show unawaited;
+
 import 'package:drift/drift.dart' show Value;
 import 'package:uuid/uuid.dart';
 
+import '../../core/services/sync_service.dart';
 import '../../domain/entities/hutang_entity.dart';
 import '../../domain/repositories/i_hutang_repository.dart';
 import '../database/app_database.dart';
@@ -8,8 +11,9 @@ import '../database/daos/hutang_dao.dart';
 
 class HutangRepositoryImpl implements IHutangRepository {
   final HutangDao _dao;
+  final SyncService _sync;
 
-  HutangRepositoryImpl(this._dao);
+  HutangRepositoryImpl(this._dao, this._sync);
 
   @override
   Stream<List<HutangEntity>> watchAll() =>
@@ -30,7 +34,7 @@ class HutangRepositoryImpl implements IHutangRepository {
   }
 
   @override
-  Future<void> insert(HutangEntity hutang) {
+  Future<void> insert(HutangEntity hutang) async {
     const uuid = Uuid();
     final now = DateTime.now().millisecondsSinceEpoch;
     final companion = HutangTableCompanion.insert(
@@ -45,7 +49,8 @@ class HutangRepositoryImpl implements IHutangRepository {
       createdAt: hutang.createdAt.millisecondsSinceEpoch,
       updatedAt: now,
     );
-    return _dao.insertHutang(companion);
+    await _dao.insertHutang(companion);
+    unawaited(_sync.upsertHutang(hutang));
   }
 
   @override
@@ -64,27 +69,40 @@ class HutangRepositoryImpl implements IHutangRepository {
       updatedAt: Value(now),
     );
     await _dao.updateHutang(companion);
+    unawaited(_sync.upsertHutang(hutang));
   }
 
   @override
   Future<void> delete(String id) async {
     await _dao.deletePaymentsForHutang(id);
     await _dao.deleteHutang(id);
+    unawaited(_sync.deleteHutang(id));
   }
 
   @override
   Future<void> addPayment(String hutangId, PaymentRecord payment) async {
     const uuid = Uuid();
+    final id = payment.id.isEmpty ? uuid.v4() : payment.id;
+    final createdAt = DateTime.now().millisecondsSinceEpoch;
     final companion = PaymentHistoryTableCompanion.insert(
-      id: payment.id.isEmpty ? uuid.v4() : payment.id,
+      id: id,
       referenceId: hutangId,
       referenceType: 'hutang',
       amount: payment.amount,
       paidAt: payment.paidAt.millisecondsSinceEpoch,
       catatan: Value(payment.catatan),
-      createdAt: DateTime.now().millisecondsSinceEpoch,
+      createdAt: createdAt,
     );
     await _dao.insertPayment(companion);
+    unawaited(_sync.upsertPaymentRecord(
+      id: id,
+      referenceId: hutangId,
+      referenceType: 'hutang',
+      amount: payment.amount,
+      paidAt: payment.paidAt.millisecondsSinceEpoch,
+      catatan: payment.catatan,
+      createdAt: createdAt,
+    ));
   }
 
   // ── Mappers ──────────────────────────────────────────────────────────────

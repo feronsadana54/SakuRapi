@@ -6,6 +6,7 @@ import '../core/constants/app_colors.dart';
 import '../domain/entities/hutang_entity.dart';
 import '../domain/entities/piutang_entity.dart';
 import '../domain/entities/transaction_entity.dart';
+import '../presentation/features/auth/email_link_screen.dart';
 import '../presentation/features/auth/login_screen.dart';
 import '../presentation/features/home/home_screen.dart';
 import '../presentation/features/hutang/hutang_detail_screen.dart';
@@ -35,6 +36,8 @@ abstract final class AppRoutes {
   static const splash = '/splash';
   static const onboarding = '/onboarding';
   static const login = '/login';
+  static const emailLink = '/login/email';
+  static const emailLinkSent = '/login/email/sent';
   static const home = '/home';
   static const transactionList = '/transactions';
   static const transactionAdd = '/transactions/add';
@@ -79,6 +82,14 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoutes.login,
         builder: (context, state) => const LoginScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.emailLink,
+        builder: (context, state) => const EmailLinkScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.emailLinkSent,
+        builder: (context, state) => const EmailLinkSentScreen(),
       ),
 
       // ── Form transaksi (layar penuh, tanpa nav bar) ───────────

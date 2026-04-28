@@ -18,19 +18,43 @@
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="DompetKu — Aplikasi pencatat keuangan pribadi yang modern dan offline-first.">
+  <meta name="description" content="SakuRapi — Aplikasi pencatat keuangan pribadi yang modern dan offline-first.">
 
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="DompetKu">
+  <meta name="apple-mobile-web-app-title" content="SakuRapi">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
 
   <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
 
-  <title>DompetKu</title>
+  <!--
+    Google Sign-In Web Client ID (OAuth 2.0).
+
+    CATATAN KEAMANAN:
+    OAuth Client ID adalah konfigurasi klien PUBLIK — bukan secret. Nilai ini
+    memang terlihat di source HTML yang dikirim ke browser, dan Google
+    merancangnya untuk publik. Namun untuk menjaga kebersihan source yang
+    di-commit, nilai nyata TIDAK ikut di-commit. Gunakan placeholder di sini.
+
+    Cara mengisi nilai untuk development lokal atau CI/CD:
+      1. Dapatkan Web Client ID dari:
+           Firebase Console → sakurapi-aa6ac → Project Settings → Web App
+           ATAU: Google Cloud Console → sakurapi-aa6ac →
+           APIs & Services → Credentials → "Web client (auto created by Google Service)"
+      2. Inject dengan skrip:
+           GOOGLE_WEB_CLIENT_ID=<nilai> bash scripts/inject_web_client_id.sh
+         ATAU edit tag di bawah secara langsung — JANGAN commit nilai nyata.
+      3. Jalankan:
+           flutter run -d chrome --web-hostname localhost --web-port 7357
+
+    Lihat docs/DEVELOPMENT_TO_DEPLOY.md §Firebase → Web untuk panduan lengkap.
+  -->
+  <meta name="google-signin-client_id" content="130977240505-hb3lmsv7gkpp9284du65f76vdql84f6k.apps.googleusercontent.com">
+
+  <title>SakuRapi</title>
   <link rel="manifest" href="manifest.json">
 </head>
 <body>

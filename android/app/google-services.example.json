@@ -1,0 +1,68 @@
+{
+  "_comment": [
+    "Ini adalah template untuk android/app/google-services.json.",
+    "File asli (google-services.json) ada di .gitignore dan TIDAK di-commit.",
+    "",
+    "Cara mendapatkan file asli:",
+    "  1. Buka Firebase Console: https://console.firebase.google.com",
+    "  2. Pilih proyek: sakurapi-aa6ac",
+    "  3. Project Settings → Android app (com.financetracker.finance_tracker)",
+    "  4. Klik tombol 'Download google-services.json'",
+    "  5. Letakkan di: android/app/google-services.json",
+    "",
+    "Atau jalankan: flutterfire configure",
+    "(memerlukan FlutterFire CLI: dart pub global activate flutterfire_cli)"
+  ],
+  "project_info": {
+    "project_number": "GANTI_DENGAN_PROJECT_NUMBER",
+    "project_id": "GANTI_DENGAN_PROJECT_ID",
+    "storage_bucket": "GANTI_DENGAN_PROJECT_ID.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "GANTI_DENGAN_ANDROID_APP_ID",
+        "android_client_info": {
+          "package_name": "com.financetracker.finance_tracker"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "GANTI_DENGAN_ANDROID_CLIENT_ID.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.financetracker.finance_tracker",
+            "certificate_hash": "GANTI_DENGAN_SHA1_DEBUG_KEYSTORE"
+          }
+        },
+        {
+          "client_id": "GANTI_DENGAN_WEB_CLIENT_ID.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "GANTI_DENGAN_ANDROID_API_KEY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "GANTI_DENGAN_WEB_CLIENT_ID.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "GANTI_DENGAN_IOS_CLIENT_ID.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.financetracker.financeTracker"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

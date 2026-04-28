@@ -1,60 +1,95 @@
-# Miscellaneous
-*.class
-*.log
-*.pyc
-*.swp
+# =========================
+# OS / Temp / Logs
+# =========================
 .DS_Store
-.atom/
-.build/
-.buildlog/
-.history
-.svn/
-.swiftpm/
-migrate_working_dir/
+Thumbs.db
+*.log
+*.tmp
+*.swp
+*.swo
 
-# IntelliJ related
+# =========================
+# IDE / Editor
+# =========================
+.idea/
 *.iml
 *.ipr
 *.iws
-.idea/
+.vscode/
 
-# The .vscode folder contains launch configuration and tasks you configure in
-# VS Code which you may wish to be included in version control, so this line
-# is commented out by default.
-#.vscode/
-
-# Flutter/Dart/Pub related
+# =========================
+# Dart / Flutter
+# =========================
+.dart_tool/
+.packages
+.pub/
+.pub-cache/
+.flutter-plugins
+.flutter-plugins-dependencies
+build/
+coverage/
 **/doc/api/
 **/ios/Flutter/.last_build_id
-.dart_tool/
-.flutter-plugins-dependencies
-.pub-cache/
-.pub/
-/build/
-/coverage/
+flutter_export_environment.sh
 
-# Symbolication related
+# =========================
+# Generated maps / symbols
+# =========================
 app.*.symbols
-
-# Obfuscation related
 app.*.map.json
 
-# Android Studio will place build artifacts here
-/android/app/debug
-/android/app/profile
-/android/app/release
+# =========================
+# Android build outputs
+# =========================
+/android/app/debug/
+/android/app/profile/
+/android/app/release/
 
-# Android signing secrets — NEVER commit these
+# =========================
+# Android signing secrets
+# =========================
 android/key.properties
 *.jks
 *.keystore
 
-# iOS signing — certificates and provisioning profiles
+# =========================
+# iOS signing secrets
+# =========================
 *.p12
 *.mobileprovision
 
-# Flutter generated
-flutter_export_environment.sh
-.flutter-plugins
+# =========================
+# Firebase platform config files
+# Berisi OAuth client IDs, SHA-1 certificate hash, dan API keys client-side.
+# Meskipun bukan secret sejati (nilai ini juga ada di APK/IPA setelah build),
+# file ini sebaiknya tidak di-commit agar tiap developer/environment
+# men-download versi terbaru dari Firebase Console.
+#
+# Cara mendapatkan kembali:
+#   Android : Firebase Console → Project Settings → google-services.json
+#   iOS     : Firebase Console → Project Settings → GoogleService-Info.plist
+#   Dart    : jalankan `flutterfire configure` (regenerate lib/firebase_options.dart)
+#
+# Template tersedia di:
+#   android/app/google-services.example.json
+#   ios/Runner/GoogleService-Info.example.plist
+# =========================
+android/app/google-services.json
+ios/Runner/GoogleService-Info.plist
 
-docs\DEVELOPMENT_TO_DEPLOY.md
+# =========================
+# Local env / machine-specific
+# =========================
+.env
+.env.*
+*.local
+
+# =========================
+# Claude local files
+# =========================
+.claude/
+.claude-cache/
+.claude.json
+
+
+docs\WEB_TEST_CASES.txt

@@ -31,18 +31,15 @@ class DailyReportTab extends ConsumerWidget {
           onPrev: () => ref.read(selectedDayProvider.notifier).state =
               selectedDay.subtract(const Duration(days: 1)),
           onNext: () {
-            final next = selectedDay.add(const Duration(days: 1));
-            final today = AppDateUtils.dateOnly(DateTime.now());
-            if (!next.isAfter(today)) {
-              ref.read(selectedDayProvider.notifier).state = next;
-            }
+            ref.read(selectedDayProvider.notifier).state =
+                selectedDay.add(const Duration(days: 1));
           },
           onTap: () async {
             final picked = await showDatePicker(
               context: context,
               initialDate: selectedDay,
               firstDate: DateTime(2000),
-              lastDate: DateTime.now(),
+              lastDate: DateTime(2100),
               locale: const Locale('id', 'ID'),
               builder: (ctx, child) => Theme(
                 data: Theme.of(ctx).copyWith(
@@ -58,8 +55,7 @@ class DailyReportTab extends ConsumerWidget {
                   AppDateUtils.dateOnly(picked);
             }
           },
-          canGoNext: !selectedDay
-              .isAtSameMomentAs(AppDateUtils.dateOnly(DateTime.now())),
+          canGoNext: true,
         ),
         // ── Content ─────────────────────────────────────────────────
         Expanded(

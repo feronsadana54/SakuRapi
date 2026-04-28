@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:app_links/app_links.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -13,26 +14,27 @@ import 'app.dart';
 import 'core/services/notification_service.dart';
 import 'data/repositories/settings_repository_impl.dart';
 import 'firebase_options.dart';
+import 'presentation/providers/auth_provider.dart';
 import 'presentation/providers/database_provider.dart';
 
-/// Guard agar inisialisasi background hanya berjalan sekali per lifetime proses.
 bool _bgInitDone = false;
 
 /// Titik masuk utama aplikasi SakuRapi.
 ///
 /// Urutan eksekusi:
 ///   1. Inisialisasi binding Flutter
-///   2. Firebase.initializeApp() — hanya jika [kFirebaseConfigured] == true
-///   3. Muat SharedPreferences (diperlukan sebelum runApp)
-///   4. Jalankan aplikasi dalam ProviderScope (Riverpod)
-///   5. Setelah frame pertama: inisialisasi timezone + jadwalkan notifikasi
-///
-/// Semua pekerjaan berat (Firebase, timezone, notifikasi) ditangani secara
-/// aman dengan timeout dan try/catch agar UI tetap responsif.
+///   2. Firebase.initializeApp()
+///   3. Muat SharedPreferences
+///   4. Tangkap deep link awal (cold start) via app_links
+///   5. Buat ProviderContainer (bukan ProviderScope) agar bisa mengakses
+///      provider dari luar widget tree — diperlukan untuk mendaftarkan
+///      URI email sign-in yang masuk setelah aplikasi hidup
+///   6. Jalankan runApp dengan UncontrolledProviderScope
+///   7. Daftarkan listener app_links untuk URI yang masuk di foreground
+///   8. Inisialisasi timezone + notifikasi setelah frame pertama
 Future<void> main() async {
   final binding = WidgetsFlutterBinding.ensureInitialized();
 
-  // Orientasi: fire-and-forget, tidak kritis.
   unawaited(SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
@@ -40,7 +42,6 @@ Future<void> main() async {
     DeviceOrientation.landscapeRight,
   ]));
 
-  // Status bar transparan dengan ikon gelap.
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
@@ -48,43 +49,64 @@ Future<void> main() async {
     ),
   );
 
-  // Inisialisasi Firebase — hanya jika sudah dikonfigurasi via flutterfire CLI.
-  // Jika kFirebaseConfigured masih false, lewati dan jalankan dalam mode lokal.
-  // Lihat lib/firebase_options.dart dan docs/DEVELOPMENT_TO_DEPLOY.md §3.
-  if (kFirebaseConfigured) {
-    try {
-      await Firebase.initializeApp(
-        options: DefaultFirebaseOptions.currentPlatform,
-      ).timeout(const Duration(seconds: 10));
-    } catch (_) {
-      // Firebase gagal init — aplikasi tetap berjalan dalam mode lokal/tamu.
-    }
+  try {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    ).timeout(const Duration(seconds: 10));
+  } catch (_) {
+    // Firebase gagal init — aplikasi tetap berjalan dalam mode lokal/tamu.
   }
 
-  // SharedPreferences harus siap sebelum runApp agar override provider berjalan.
   final prefs = await SharedPreferences.getInstance();
 
+  // Tangkap URI yang membuka aplikasi dari cold start (email sign-in link).
+  // Hanya pada native — web menangani sendiri via Firebase Auth redirect.
+  String? initialLink;
+  if (!kIsWeb) {
+    try {
+      final uri = await AppLinks()
+          .getInitialLink()
+          .timeout(const Duration(seconds: 2));
+      initialLink = uri?.toString();
+    } catch (_) {}
+  }
+
+  // Gunakan ProviderContainer langsung agar main() dapat mengakses provider
+  // dari luar widget tree (untuk mendaftarkan URI deep link).
+  final container = ProviderContainer(
+    overrides: [
+      sharedPreferencesProvider.overrideWithValue(prefs),
+    ],
+  );
+
+  // Daftarkan URI awal jika ada (cold start via email link).
+  if (initialLink != null) {
+    container.read(pendingEmailLinkProvider.notifier).state = initialLink;
+  }
+
   runApp(
-    ProviderScope(
-      overrides: [
-        sharedPreferencesProvider.overrideWithValue(prefs),
-      ],
+    UncontrolledProviderScope(
+      container: container,
       child: const App(),
     ),
   );
 
+  // Dengarkan URI baru saat aplikasi sudah berjalan (foreground / background).
+  // Stream ini hidup selama proses aplikasi berjalan — tidak perlu di-cancel.
+  if (!kIsWeb) {
+    AppLinks().uriLinkStream.listen((uri) {
+      container.read(pendingEmailLinkProvider.notifier).state =
+          uri.toString();
+    });
+  }
+
   // Tunda inisialisasi berat ke setelah frame pertama.
-  // Notifikasi tidak didukung di web.
   if (!kIsWeb) {
     binding.addPostFrameCallback((_) => _initBackground(prefs));
   }
 }
 
-/// Inisialisasi timezone + penjadwalan notifikasi setelah frame pertama.
-///
-/// Setiap operasi dibungkus timeout agar plugin platform yang bermasalah
-/// tidak membekukan aplikasi. Semua kegagalan diabaikan; aplikasi berjalan
-/// penuh tanpa notifikasi jika inisialisasi ini gagal.
+/// Inisialisasi timezone + notifikasi setelah frame pertama.
 Future<void> _initBackground(SharedPreferences prefs) async {
   if (_bgInitDone) return;
   _bgInitDone = true;
@@ -104,7 +126,6 @@ Future<void> _initBackground(SharedPreferences prefs) async {
     if (!notifEnabled) return;
 
     final notificationService = NotificationService();
-
     await notificationService
         .initialize()
         .timeout(const Duration(seconds: 3));
@@ -116,7 +137,5 @@ Future<void> _initBackground(SharedPreferences prefs) async {
     await notificationService
         .scheduleReminders(hour: hour, minute: minute, weekdays: days)
         .timeout(const Duration(seconds: 3));
-  } catch (_) {
-    // Non-fatal: notifikasi tidak tersedia saat peluncuran ini.
-  }
+  } catch (_) {}
 }

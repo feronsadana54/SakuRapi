@@ -1,4 +1,7 @@
+import 'dart:developer' as dev;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
@@ -8,7 +11,6 @@ import '../../../core/constants/app_strings.dart';
 import '../../../core/responsive/app_spacing.dart';
 import '../../../core/responsive/app_type_scale.dart';
 import '../../../core/responsive/responsive_container.dart';
-import '../../../firebase_options.dart';
 import '../../../presentation/providers/auth_provider.dart';
 import '../../../router/app_router.dart';
 
@@ -16,10 +18,7 @@ import '../../../router/app_router.dart';
 ///
 /// Menawarkan dua pilihan:
 ///   1. Masuk sebagai Tamu — data lokal saja, tanpa akun.
-///   2. Masuk dengan Google — Firebase Auth + Firestore sync (perlu konfigurasi).
-///
-/// Google Sign-In menampilkan tombol aktif jika [kFirebaseConfigured] == true,
-/// atau menampilkan info "segera hadir" jika belum dikonfigurasi.
+///   2. Masuk dengan Google — Firebase Auth + Firestore sync.
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
 
@@ -30,6 +29,10 @@ class LoginScreen extends ConsumerStatefulWidget {
 class _LoginScreenState extends ConsumerState<LoginScreen> {
   bool _isLoading = false;
   String? _loadingMode; // 'guest' | 'google'
+
+  // ── Email sign-in ─────────────────────────────────────────────────────────
+
+  void _goToEmailLink() => context.push(AppRoutes.emailLink);
 
   // ── Guest sign-in ─────────────────────────────────────────────────────────
 
@@ -42,14 +45,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       await ref.read(currentUserProvider.notifier).signInAsGuest();
       if (!mounted) return;
       context.go(AppRoutes.home);
-    } catch (e) {
+    } catch (e, st) {
+      dev.log('Guest sign-in error', error: e, stackTrace: st, name: 'LoginScreen');
       if (!mounted) return;
       setState(() {
         _isLoading = false;
         _loadingMode = null;
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${AppStrings.errorGeneral} ($e)')),
+        SnackBar(content: Text(AppStrings.errorGeneral)),
       );
     }
   }
@@ -57,18 +61,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   // ── Google sign-in ────────────────────────────────────────────────────────
 
   Future<void> _signInWithGoogle() async {
-    // Jika Firebase belum dikonfigurasi, tampilkan pesan informatif
-    if (!kFirebaseConfigured) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(AppStrings.googleSignInNotConfigured),
-          behavior: SnackBarBehavior.floating,
-          duration: Duration(seconds: 4),
-        ),
-      );
-      return;
-    }
-
     setState(() {
       _isLoading = true;
       _loadingMode = 'google';
@@ -99,14 +91,160 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         _isLoading = false;
         _loadingMode = null;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(AppStrings.googleSignInFailed),
-          behavior: SnackBarBehavior.floating,
-          duration: const Duration(seconds: 4),
-        ),
-      );
+      _showGoogleErrorDialog(e.toString());
     }
+  }
+
+  /// Menampilkan dialog error login Google.
+  ///
+  /// Pesan yang ditampilkan ke pengguna selalu dalam Bahasa Indonesia.
+  /// Detail teknis tidak ditampilkan di UI — hanya tersedia via tombol Salin.
+  void _showGoogleErrorDialog(String raw) {
+    final friendlyMsg = _googleErrorMessage(raw);
+    final lower = raw.toLowerCase();
+    final isAndroidConfigError = lower.contains('apiexception: 10') ||
+        lower.contains('developer_error') ||
+        lower.contains('sign_in_failed') ||
+        lower.contains('idtoken kosong');
+    final isWebConfigError = lower.contains('[firebase:operation-not-allowed') ||
+        lower.contains('[firebase:invalid-api-key') ||
+        lower.contains('[firebase:invalid-credential');
+
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.error_outline_rounded, color: AppColors.expense, size: 22),
+            SizedBox(width: 8),
+            Text('Login Gagal', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(friendlyMsg, style: const TextStyle(fontSize: 14, height: 1.5)),
+            if (isAndroidConfigError) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: AppColors.expenseLight,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Text(
+                  'Checklist Android:\n'
+                  '1. SHA-1 debug key sudah didaftarkan di Firebase Console?\n'
+                  '2. Google Sign-In diaktifkan di Authentication > Sign-in providers?\n'
+                  '3. google-services.json sudah di-download ulang?',
+                  style: TextStyle(fontSize: 12, height: 1.6),
+                ),
+              ),
+            ],
+            if (isWebConfigError) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: AppColors.expenseLight,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Text(
+                  'Checklist Web:\n'
+                  '1. Google Sign-In diaktifkan di Firebase Authentication?\n'
+                  '2. Authorized JavaScript Origins sudah mencakup URL dev/produksi?\n'
+                  '3. Gunakan port tetap: flutter run -d chrome --web-port 7357',
+                  style: TextStyle(fontSize: 12, height: 1.6),
+                ),
+              ),
+            ],
+          ],
+        ),
+        actions: [
+          TextButton.icon(
+            icon: const Icon(Icons.copy_rounded, size: 16),
+            label: const Text('Salin Detail'),
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: raw));
+              Navigator.of(ctx).pop();
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Detail error disalin ke clipboard.'),
+                  behavior: SnackBarBehavior.floating,
+                  duration: Duration(seconds: 2),
+                ),
+              );
+            },
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Tutup'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Mengonversi kode error Firebase/Google Sign-In ke pesan ramah pengguna dalam Bahasa Indonesia.
+  String _googleErrorMessage(String raw) {
+    final lower = raw.toLowerCase();
+
+    // Pengguna menutup popup (web)
+    if (lower.contains('popup-closed-by-user') ||
+        lower.contains('popup_closed') ||
+        lower.contains('cancelled-popup-request')) {
+      return 'Login dibatalkan.';
+    }
+
+    // Browser memblokir popup (web)
+    if (lower.contains('popup-blocked')) {
+      return 'Browser kamu memblokir popup login Google. '
+          'Izinkan popup untuk situs ini, lalu coba lagi.';
+    }
+
+    // Pengguna membatalkan (native)
+    if (lower.contains('sign_in_cancelled') ||
+        lower.contains('canceled') ||
+        lower.contains('cancelled')) {
+      return 'Login dibatalkan.';
+    }
+
+    // Jaringan
+    if (lower.contains('network_error') ||
+        lower.contains('network-request-failed') ||
+        (lower.contains('network') && !lower.contains('sign_in'))) {
+      return 'Tidak ada koneksi internet. Coba lagi setelah terhubung ke jaringan.';
+    }
+
+    // Kode error Firebase — ekstrak dan terjemahkan
+    final firebaseMatch = RegExp(r'\[firebase:([^\]]+)\]').firstMatch(raw);
+    final firebaseCode = firebaseMatch?.group(1) ?? '';
+    if (firebaseCode == 'invalid-credential' || firebaseCode == 'invalid-api-key') {
+      return 'Konfigurasi Firebase tidak valid. Hubungi pengembang.';
+    }
+    if (firebaseCode == 'operation-not-allowed') {
+      return 'Login Google belum diaktifkan di Firebase. Hubungi pengembang.';
+    }
+    if (firebaseCode == 'user-disabled') {
+      return 'Akun ini telah dinonaktifkan.';
+    }
+    if (firebaseCode == 'account-exists-with-different-credential') {
+      return 'Akun sudah terdaftar dengan metode login lain.';
+    }
+
+    // Developer/konfigurasi error native (ApiException 10 = DEVELOPER_ERROR)
+    if (lower.contains('sign_in_failed') ||
+        lower.contains('apiexception: 10') ||
+        lower.contains('developer_error') ||
+        lower.contains('idtoken kosong')) {
+      return 'Login Google belum siap. Pastikan SHA-1 sudah terdaftar di Firebase '
+          'Console dan Google Sign-In sudah diaktifkan di Authentication.';
+    }
+
+    // Fallback ramah
+    return 'Login Google gagal. Coba lagi atau gunakan mode tamu.';
   }
 
   // ── Build ─────────────────────────────────────────────────────────────────
@@ -114,7 +252,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     final p = AppSpacing.pagePadding(context);
-    final googleReady = kFirebaseConfigured;
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -193,18 +330,23 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 _LoginButton(
                   icon: Icons.account_circle_outlined,
                   label: AppStrings.loginWithGoogle,
-                  note: googleReady
-                      ? AppStrings.googleSyncNote
-                      : 'Memerlukan konfigurasi Firebase',
-                  color: googleReady
-                      ? AppColors.primary
-                      : AppColors.textSecondary,
-                  bgColor: googleReady
-                      ? AppColors.primaryContainer
-                      : AppColors.surfaceVariant,
+                  note: AppStrings.googleSyncNote,
+                  color: AppColors.primary,
+                  bgColor: AppColors.primaryContainer,
                   isLoading: _isLoading && _loadingMode == 'google',
-                  isDisabled: !googleReady,
                   onTap: _isLoading ? null : _signInWithGoogle,
+                ),
+                SizedBox(height: AppSpacing.cardGap(context)),
+
+                // ── Tombol Email Link ──────────────────────────────────
+                _LoginButton(
+                  icon: Icons.mail_outline_rounded,
+                  label: AppStrings.loginWithEmail,
+                  note: AppStrings.emailLinkNote,
+                  color: AppColors.primary,
+                  bgColor: AppColors.primaryContainer,
+                  isLoading: false,
+                  onTap: _isLoading ? null : _goToEmailLink,
                 ),
 
                 SizedBox(height: AppSpacing.xl),
@@ -228,12 +370,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
-                          googleReady
-                              ? 'Login Google menyinkronkan data ke cloud. '
-                                'Ganti perangkat dan login lagi untuk memulihkan data.'
-                              : 'Mode tamu menyimpan data hanya di perangkat ini. '
-                                'Login Google (memerlukan konfigurasi Firebase) '
-                                'akan menyinkronkan data ke cloud.',
+                          'Login Google atau Email menyinkronkan data ke cloud. '
+                          'Ganti perangkat dan login lagi untuk memulihkan data.',
                           style: TextStyle(
                             fontSize: AppTypeScale.caption(context),
                             color: AppColors.textSecondary,
@@ -262,7 +400,6 @@ class _LoginButton extends StatelessWidget {
   final Color color;
   final Color bgColor;
   final bool isLoading;
-  final bool isDisabled;
   final VoidCallback? onTap;
 
   const _LoginButton({
@@ -272,112 +409,79 @@ class _LoginButton extends StatelessWidget {
     required this.color,
     required this.bgColor,
     required this.isLoading,
-    this.isDisabled = false,
     this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Opacity(
-      opacity: isDisabled ? 0.6 : 1.0,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: isDisabled
-                  ? AppColors.divider
-                  : color.withValues(alpha: 0.4),
-              width: isDisabled ? 0.5 : 1.5,
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: color.withValues(alpha: 0.4),
+            width: 1.5,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.04),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
             ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.04),
-                blurRadius: 8,
-                offset: const Offset(0, 2),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: bgColor,
+                borderRadius: BorderRadius.circular(12),
               ),
-            ],
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  color: bgColor,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: isLoading
-                    ? const Padding(
-                        padding: EdgeInsets.all(12),
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: AppColors.primary,
-                        ),
-                      )
-                    : Icon(icon, color: color, size: 26),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Text(
-                          label,
-                          style: TextStyle(
-                            fontSize: AppTypeScale.bodyText(context),
-                            fontWeight: FontWeight.w600,
-                            color: isDisabled
-                                ? AppColors.textSecondary
-                                : AppColors.textPrimary,
-                          ),
-                        ),
-                        if (isDisabled) ...[
-                          const SizedBox(width: 6),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: AppColors.surfaceVariant,
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Text(
-                              'Setup diperlukan',
-                              style: TextStyle(
-                                fontSize: AppTypeScale.caption(context) - 1,
-                                color: AppColors.textSecondary,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      note,
-                      style: TextStyle(
-                        fontSize: AppTypeScale.caption(context),
-                        color: AppColors.textSecondary,
+              child: isLoading
+                  ? const Padding(
+                      padding: EdgeInsets.all(12),
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: AppColors.primary,
                       ),
+                    )
+                  : Icon(icon, color: color, size: 26),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: AppTypeScale.bodyText(context),
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textPrimary,
                     ),
-                  ],
-                ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    note,
+                    style: TextStyle(
+                      fontSize: AppTypeScale.caption(context),
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                ],
               ),
-              Icon(
-                Icons.chevron_right_rounded,
-                color: isDisabled
-                    ? AppColors.divider
-                    : AppColors.textSecondary,
-              ),
-            ],
-          ),
+            ),
+            const Icon(
+              Icons.chevron_right_rounded,
+              color: AppColors.textSecondary,
+            ),
+          ],
         ),
       ),
     );

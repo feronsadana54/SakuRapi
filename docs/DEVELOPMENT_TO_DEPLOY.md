@@ -14,7 +14,7 @@
 5. [Menjalankan Test](#menjalankan-test)
 6. [Build untuk Android](#build-untuk-android)
 7. [Build untuk iOS](#build-untuk-ios)
-8. [Mengaktifkan Firebase (Opsional)](#mengaktifkan-firebase-opsional)
+8. [Firebase & Google Login](#firebase--google-login)
 9. [Strategi Testing](#strategi-testing)
 10. [Checklist Sebelum Deploy](#checklist-sebelum-deploy)
 11. [Troubleshooting Umum](#troubleshooting-umum)
@@ -53,6 +53,31 @@ cd project_ai_claude_apk_android_ios
 flutter pub get
 ```
 
+### 2b. Setup File Konfigurasi Firebase (wajib untuk fitur Google Sign-In)
+
+File `android/app/google-services.json` dan `ios/Runner/GoogleService-Info.plist`
+ada di `.gitignore` dan **tidak ikut di-commit**. Kamu perlu men-download-nya sendiri.
+
+**Android:**
+1. Buka [console.firebase.google.com](https://console.firebase.google.com) → proyek `sakurapi-aa6ac`
+2. Project Settings → tab "Your apps" → Android app (`com.financetracker.finance_tracker`)
+3. Klik **Download google-services.json** → letakkan di `android/app/google-services.json`
+
+**iOS:**
+1. Di halaman yang sama → iOS app (`com.financetracker.financeTracker`)
+2. Klik **Download GoogleService-Info.plist** → letakkan di `ios/Runner/GoogleService-Info.plist`
+
+Template placeholder tersedia di:
+- `android/app/google-services.example.json`
+- `ios/Runner/GoogleService-Info.example.plist`
+
+> **Catatan:** `lib/firebase_options.dart` sengaja di-commit agar proyek bisa
+> langsung di-build. Berisi public client config (bukan secret).
+> Lihat `docs/CONFIG_AND_SECRET_AUDIT.txt` untuk penjelasan lengkap keamanan.
+
+> **Tanpa google-services.json:** Build Android akan gagal. Mode tamu tetap bisa
+> ditest di iOS Simulator tanpa GoogleService-Info.plist, tapi Google Sign-In tidak akan jalan.
+
 ### 3. Generate Kode Drift (wajib dilakukan setelah clone atau setelah mengubah skema DB)
 
 ```bash
@@ -88,6 +113,17 @@ flutter run --release
 # Jalankan di emulator spesifik
 flutter run -d emulator-5554
 ```
+
+### Web (Chrome)
+
+```bash
+# Direkomendasikan — port tetap agar origin dev konsisten
+flutter run -d chrome --web-hostname localhost --web-port 7357
+```
+
+> **Catatan Web:** Mode tamu berjalan penuh di web tanpa Firebase. Login Google
+> menggunakan `FirebaseAuth.signInWithPopup` (bukan `google_sign_in`) dan memerlukan
+> konfigurasi Authorized JavaScript Origins — lihat §Firebase → Web di bawah.
 
 ### Melihat semua device yang tersedia
 
@@ -255,38 +291,231 @@ Di Xcode:
 
 ---
 
-## Mengaktifkan Firebase (Opsional)
+## Firebase & Google Login
 
-Firebase diperlukan untuk fitur **Login Google** dan **sinkronisasi cloud**.
-Tanpa Firebase, aplikasi tetap berjalan penuh dalam mode lokal/tamu.
+Firebase digunakan untuk fitur **Login Google**, **Login Email Link (passwordless)**, dan **sinkronisasi cloud Firestore realtime**.
+Firebase sudah dikonfigurasi di proyek ini (proyek: `sakurapi-aa6ac`).
+Tanpa melengkapi setup di bawah, pengguna dapat menggunakan mode tamu dengan data lokal penuh.
 
-### Langkah-langkah Aktivasi Firebase
+### Package yang Digunakan
+
+| Package | Fungsi |
+|---------|--------|
+| `firebase_core` | Inisialisasi Firebase SDK |
+| `firebase_auth` | Autentikasi pengguna via Google (semua platform) |
+| `google_sign_in` | Dialog pemilih akun Google (Android dan iOS saja) |
+| `cloud_firestore` | Sinkronisasi data ke cloud |
+
+### Cara Kerja Login Google — Per Platform
+
+Login Google menggunakan alur yang **berbeda per platform** untuk menghindari masalah
+idToken kosong yang sering terjadi jika `google_sign_in` digunakan di browser.
+
+#### Web
+
+```
+Pengguna ketuk "Masuk dengan Google"
+  └─ AuthService._signInWithGoogleWeb()
+      └─ FirebaseAuth.instance.signInWithPopup(GoogleAuthProvider())
+          ← popup browser native, OAuth dikelola penuh oleh Firebase SDK
+          ← tidak menggunakan google_sign_in sama sekali
+          ← tidak perlu idToken manual
+      └─ UserCredential.user → _persistAndBuildUser()
+      └─ SharedPreferences diperbarui (mode = 'google')
+```
+
+**Syarat:** Authorized JavaScript Origins di Google Cloud Console harus mencakup
+URL yang digunakan (localhost:port untuk dev, domain produksi untuk prod).
+
+#### Android / iOS
+
+```
+Pengguna ketuk "Masuk dengan Google"
+  └─ AuthService._signInWithGoogleNative()
+      └─ GoogleSignIn(serverClientId: _webClientId).signIn()
+          ← dialog pemilih akun native Android/iOS
+      └─ googleAccount.authentication → idToken (wajib)
+      └─ GoogleAuthProvider.credential(idToken: ...) → FirebaseAuth.signInWithCredential()
+      └─ UserCredential.user → _persistAndBuildUser()
+      └─ SharedPreferences diperbarui (mode = 'google')
+```
+
+**Syarat:** SHA-1 fingerprint debug/release harus terdaftar di Firebase Console (Android).
+
+### Cara Kerja Logout
+
+**Google user:**
+- Web    → `FirebaseAuth.instance.signOut()` saja (google_sign_in tidak digunakan di web)
+- Native → `FirebaseAuth.instance.signOut()` + `GoogleSignIn.signOut()`
+- SharedPreferences dibersihkan (id, name, email, mode)
+- Data lokal SQLite tetap ada
+
+**Guest user:**
+- Tidak ada akun — Settings menampilkan "Akhiri Sesi Tamu" bukan "Keluar"
+- Hanya SharedPreferences yang dibersihkan
+- Data lokal SQLite tetap ada
+
+### Migrasi Data Tamu ke Google
+
+Pengguna tamu bisa upgrade ke Google tanpa kehilangan data:
+1. Settings → Akun → **Masuk dengan Google**
+2. `AuthNotifier.upgradeGuestToGoogle()` dipanggil:
+   a. Login Google → SharedPreferences diperbarui (mode = 'google')
+   b. State diperbarui ke `AsyncData(user)` **segera** → user tidak menunggu
+   c. Background: `_migrateLocalDataToCloud()` + `restoreFromCloud()` berjalan di belakang
+   d. `SyncService.migrateGuestData()` menggunakan **Firestore WriteBatch** (maks 500/batch)
+      — jauh lebih cepat dari N sequential individual writes sebelumnya
+3. Banner "Sedang memulihkan data..." muncul di HomeScreen selama proses berjalan
+
+**Strategi merge (local wins):** Semua record di-batch-upsert ke Firestore berdasarkan ID.
+Jika akun Google sudah punya data sebelumnya, record dengan ID sama di-overwrite; record
+berbeda ditambahkan. Kegagalan migrasi bersifat non-fatal — data lokal tetap aman.
+
+---
+
+### Setup Android: SHA-1 (Langkah Wajib)
+
+Google Sign-In pada Android **memerlukan SHA-1 fingerprint** terdaftar di Firebase Console.
+
+#### Langkah 1 — Dapatkan SHA-1 Debug
+
+**Windows:**
+```cmd
+keytool -list -v -keystore %USERPROFILE%\.android\debug.keystore -alias androiddebugkey -storepass android -keypass android
+```
+
+**macOS / Linux:**
+```bash
+keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android -keypass android
+```
+
+Salin nilai **SHA1** dari output (format: `XX:XX:XX:...:XX`).
+
+#### Langkah 2 — Tambahkan SHA-1 di Firebase Console
+
+1. Buka [console.firebase.google.com](https://console.firebase.google.com) → proyek `sakurapi-aa6ac`
+2. **Project Settings** → tab **Your apps** → Android app (`com.financetracker.finance_tracker`)
+3. Klik **Add fingerprint** → paste nilai SHA-1 → **Save**
+
+#### Langkah 3 — Download Ulang google-services.json
+
+Setelah SHA-1 ditambahkan:
+1. Di halaman yang sama klik **Download google-services.json**
+2. Letakkan file baru di `android/app/google-services.json` (timpa yang lama)
+
+#### Langkah 4 — Jalankan dan Test
 
 ```bash
-# 1. Buat proyek Firebase di https://console.firebase.google.com
-#    Aktifkan: Authentication (provider: Google), Firestore Database
-
-# 2. Pasang FlutterFire CLI
-dart pub global activate flutterfire_cli
-
-# 3. Konfigurasi proyek (ikuti instruksi interaktif)
-flutterfire configure
-#    Perintah ini akan:
-#    - Menghasilkan lib/firebase_options.dart dengan kredensial nyata
-#    - Menambahkan google-services.json ke android/app/
-#    - Menambahkan GoogleService-Info.plist ke ios/Runner/
-
-# 4. Aktifkan flag Firebase di lib/firebase_options.dart:
-#    Ubah:  const bool kFirebaseConfigured = false;
-#    Menjadi: const bool kFirebaseConfigured = true;
-
-# 5. Jalankan ulang
 flutter run
 ```
 
+1. Ketuk **Masuk dengan Google** → dialog pemilih akun muncul
+2. Pilih akun → masuk ke HomeScreen
+3. Cek Firebase Console → Authentication → Users
+
+> **Tanpa SHA-1**: tombol "Masuk dengan Google" menampilkan pesan error Bahasa Indonesia
+> "Login Google belum siap. Periksa konfigurasi SHA-1..." — bukan dialog setup developer.
+
+---
+
+### Setup Web: Authorized JavaScript Origins & Web Client ID (Langkah Wajib)
+
+Login Google di web menggunakan `FirebaseAuth.instance.signInWithPopup(GoogleAuthProvider())` —
+**bukan** `google_sign_in`. Firebase SDK menangani OAuth popup secara penuh di browser.
+
+#### Langkah 1 — Daftarkan Authorized Origins di Google Cloud Console
+
+1. Buka [console.cloud.google.com](https://console.cloud.google.com) → pilih proyek `sakurapi-aa6ac`
+2. **APIs & Services → Credentials → OAuth 2.0 Client IDs**
+3. Klik Web Client yang auto-dibuat oleh Firebase (nama biasanya "Web client (auto created by Google Service)")
+4. Di **Authorized JavaScript origins**, tambahkan:
+   - `http://localhost` (mencakup semua port, atau gunakan `http://localhost:7357` jika ingin eksplisit)
+   - `https://sakurapi.web.app` ← (atau domain produksimu jika ada)
+5. Di **Authorized redirect URIs**, tambahkan:
+   - `https://sakurapi-aa6ac.firebaseapp.com/__/auth/handler`
+     (biasanya sudah ada — ini digunakan oleh signInWithPopup)
+6. **Save** → tunggu 1–2 menit agar perubahan propagasi
+
+#### Langkah 2 — Inject Web Client ID ke web/index.html
+
+`web/index.html` berisi placeholder `YOUR_GOOGLE_WEB_CLIENT_ID.apps.googleusercontent.com`
+yang perlu diganti dengan nilai nyata sebelum menjalankan di browser.
+
+> **Mengapa placeholder?** Web Client ID adalah public client config — bukan secret.
+> Nilai ini tetap terlihat di source HTML yang dikirim ke browser setelah diisi.
+> Placeholder digunakan hanya untuk menjaga kebersihan source yang di-commit.
+> Gunakan `--dart-define` untuk native (Android/iOS); untuk web, gunakan skrip inject.
+
+```bash
+# Dapatkan Web Client ID dari Firebase Console → sakurapi-aa6ac →
+# Project Settings → Web App → OAuth 2.0 client ID
+# ATAU: Google Cloud Console → APIs & Services → Credentials → Web client
+
+# Inject ke web/index.html
+GOOGLE_WEB_CLIENT_ID=xxx.apps.googleusercontent.com bash scripts/inject_web_client_id.sh
+
+# Jalankan — port tetap agar origin konsisten
+flutter run -d chrome --web-hostname localhost --web-port 7357
+
+# Kembalikan placeholder setelah selesai (agar tidak ter-commit)
+git checkout web/index.html
+```
+
+Untuk CI/CD atau production build, jalankan inject script sebelum `flutter build web`:
+
+```bash
+GOOGLE_WEB_CLIENT_ID=$SECRET_FROM_CI bash scripts/inject_web_client_id.sh
+flutter build web --release
+```
+
+> **Error `popup-blocked`:** Jika browser memblokir popup, pengguna akan melihat pesan
+> Bahasa Indonesia yang meminta mereka mengizinkan popup untuk situs ini.
+
+> **Error `popup-closed-by-user`:** Jika pengguna menutup popup sebelum selesai login,
+> aplikasi menampilkan "Login dibatalkan." — bukan error teknis.
+
+#### Konfigurasi Native (Android/iOS) — dart-define
+
+Untuk native, `_webClientId` di `auth_service.dart` dibaca dari `--dart-define`:
+
+```bash
+# Development
+flutter run \
+  --dart-define=GOOGLE_WEB_CLIENT_ID=xxx.apps.googleusercontent.com
+
+# Build release
+flutter build apk --release \
+  --dart-define=GOOGLE_WEB_CLIENT_ID=xxx.apps.googleusercontent.com
+
+flutter build appbundle --release \
+  --dart-define=GOOGLE_WEB_CLIENT_ID=xxx.apps.googleusercontent.com
+```
+
+Jika `--dart-define` tidak diberikan, `auth_service.dart` menggunakan placeholder default
+dan native Google Sign-In akan gagal dengan error idToken null.
+
+---
+
+### Setup Firebase Console dari Awal (jika ganti proyek)
+
+Jika menggunakan proyek Firebase baru (bukan `sakurapi-aa6ac`), jalankan:
+
+```bash
+dart pub global activate flutterfire_cli
+flutterfire configure
+```
+
+Ini akan memperbarui `lib/firebase_options.dart` dengan kredensial proyek baru.
+Pastikan juga:
+- **Authentication** → **Sign-in method** → aktifkan **Google**
+- **Authentication** → **Sign-in method** → aktifkan **Email/Password** lalu sub-opsi **Email link (passwordless sign-in)**
+- **Firestore Database** → buat database → region `asia-southeast2` (Jakarta)
+
+---
+
 ### Konfigurasi Firestore Security Rules
 
-Di Firebase Console → Firestore → Rules, terapkan rules berikut:
+Di **Firebase Console → Firestore → Rules**, terapkan rules berikut untuk produksi:
 
 ```javascript
 rules_version = '2';
@@ -297,6 +526,183 @@ service cloud.firestore {
     }
   }
 }
+```
+
+---
+
+### Cara Kerja Sinkronisasi Firestore — Arsitektur 3 Lapisan
+
+Sinkronisasi aktif untuk mode `google` dan `emailLink`. Mode tamu tidak sync.
+
+#### Lapisan 1 — Upload Otomatis (fire-and-forget)
+
+Setiap operasi tulis (insert/update/delete) di-sync ke Firestore via `unawaited()` — tidak memblokir UI:
+
+```
+Pengguna tambah transaksi
+  └─ TransactionRepositoryImpl.insert()
+      ├─ TransactionDao.insert() — tulis ke SQLite lokal (AWAIT)
+      └─ SyncService.upsertTransaction() — kirim ke Firestore (fire & forget)
+
+Pengguna bayar hutang
+  └─ HutangRepositoryImpl.addPayment()
+      ├─ HutangDao.insertPayment() — tulis ke payment_history lokal (AWAIT)
+      └─ SyncService.upsertPaymentRecord() — kirim ke Firestore (fire & forget)
+
+Pengguna buat kategori kustom
+  └─ CategoryRepositoryImpl.insert()
+      ├─ CategoryDao.insertCategory() — tulis ke categories lokal (AWAIT)
+      └─ SyncService.upsertCategory() — kirim ke Firestore (fire & forget)
+```
+
+#### Lapisan 2 — Restore saat Login (background, one-time)
+
+`CloudRestoreService.restoreFromCloud()` berjalan di background setelah login berhasil.
+User sudah masuk ke home screen sebelum restore selesai.
+
+**Urutan eksekusi penting** — jangan dibalik:
+
+```
+Login Google / Email Link berhasil
+  └─ AuthNotifier.signInWithGoogle() / handleEmailLink()
+      ├─ state = AsyncData(user)           ← NAVIGASI KE HOME SEGERA
+      └─ [background] _restoreBackground()
+          │
+          ├─ LANGKAH 1: SyncService.syncAllLocalCategories()
+          │     Upload semua kategori lokal → Firestore (termasuk default)
+          │     WAJIB sebelum restore agar Firestore punya kategori lengkap
+          │
+          ├─ LANGKAH 2: CloudRestoreService.restoreFromCloud()  [pass 1]
+          │     ├─ Future.wait([5 fetches]) ← PARALEL (hemat round-trip)
+          │     ├─ categories    → INSERT OR IGNORE (kustom saja)
+          │     ├─ transactions  → INSERT OR IGNORE + fallback categoryName
+          │     │     Jika categoryId cloud tidak ada lokal → cari by (name|type)
+          │     │     Jika masih tidak ada → catat di transactionsSkipped (bukan failures)
+          │     ├─ hutang        → insert baru atau update jika cloud lebih baru
+          │     ├─ piutang       → insert baru atau update jika cloud lebih baru
+          │     └─ payment_history → INSERT OR IGNORE
+          │
+          └─ LANGKAH 3 (kondisional): retry jika result.transactionsSkipped > 0
+                CloudRestoreService.restoreFromCloud()  [pass 2]
+                Diperlukan saat "first login after bootstrap": pass 1 berjalan
+                sebelum kategori terisi → transaksi terlewati. Pass 2 memastikan
+                transaksi yang tertinggal dipulihkan tanpa perlu logout ulang.
+```
+
+**Perbedaan `transactionsSkipped` vs `failures`:**
+- `transactionsSkipped` — kategori tidak ditemukan lokal (soft skip, dapat di-retry)
+- `failures` — exception teknis saat menulis ke SQLite (hard error, tidak bisa di-retry)
+
+**Semua error dicatat via `dev.log()` dengan `level: 900`** — tidak ada lagi `catch (_) {}`
+yang menelan error secara diam-diam. Setiap kegagalan individual dicatat bersama ID dokumen
+yang bermasalah, dan counter `failures` / `transactionsSkipped` dilaporkan di log akhir.
+
+#### Lapisan 3 — Realtime Multi-Device Sync (persistent Firestore listeners)
+
+`RealtimeSyncService` berlangganan ke 5 koleksi Firestore menggunakan `snapshots()`.
+Perubahan dari perangkat lain → tulis langsung ke SQLite lokal → Drift stream → UI refresh otomatis.
+
+```
+Device B mengubah hutang
+  └─ HutangRepositoryImpl.update() → SyncService.upsertHutang()
+      └─ Firestore confirms write
+          └─ Device A's listener fires (hasPendingWrites: false)
+              └─ RealtimeSyncService._onHutangSnapshot()
+                  └─ _upsertHutangFromCloud(): last-write-wins by updatedAt
+                      └─ HutangDao.updateHutang() → SQLite updated
+                          └─ Drift watchAll() emits → HutangListScreen refreshes
+
+Pencegahan write-back loop:
+  - includeMetadataChanges: true
+  - hasPendingWrites == true → SKIP (echo dari tulisan lokal yg belum dikonfirmasi)
+  - hasPendingWrites == false → PROSES (data dari server / perangkat lain)
+```
+
+**Strategi merge per koleksi (berlaku untuk Lapisan 2 dan 3):**
+
+| Koleksi | added | modified | removed |
+|---------|-------|----------|---------|
+| `transactions` | INSERT OR IGNORE | INSERT OR REPLACE | DELETE |
+| `categories` | INSERT OR IGNORE | INSERT OR REPLACE | DELETE |
+| `hutang` | insert jika baru | last-write-wins by updatedAt | DELETE |
+| `piutang` | insert jika baru | last-write-wins by updatedAt | DELETE |
+| `payment_history` | INSERT OR IGNORE | INSERT OR IGNORE | DELETE |
+
+**Timing log tersedia di dev console:**
+- `[login] Auth selesai Xms — navigasi ke home segera`
+- `[bg] Sinkronisasi N kategori lokal ke Firestore...`
+- `[restore] Fetch selesai dalam Xms — N kategori, N tx, ...`
+- `[bg] Restore pass 1 selesai — N kategori, N tx dipulihkan, N tx dilewati`
+- `[bg] N tx dilewati — memulai retry pass 2...` ← hanya jika ada yang dilewati
+- `[bg] Retry pass 2 selesai — N tx dipulihkan tambahan`
+- `[RealtimeSyncService] Listener aktif untuk uid=xxx (5 koleksi)`
+
+**Struktur data Firestore:**
+```
+users/{userId}/transactions/{txId}
+users/{userId}/hutang/{hutangId}
+users/{userId}/piutang/{piutangId}
+users/{userId}/categories/{categoryId}     ← kustom saja (isDefault=false)
+users/{userId}/payment_history/{paymentId} ← semua cicilan hutang dan piutang
+```
+
+**Yang TIDAK disinkronisasi:**
+- Settings (payday date, pengaturan notifikasi) — device-specific, tidak perlu sync
+- Kategori default (isDefault=true) — selalu ada via database seed
+- Display name — dikelola Firebase Auth; otomatis tersedia saat login di perangkat baru
+
+**Perilaku offline:**
+- SQLite lokal tetap berfungsi penuh saat tidak ada internet
+- SyncService.upsert*() gagal → diabaikan (data lokal aman)
+- RealtimeSyncService listeners pause otomatis saat offline (Firestore SDK)
+- Saat kembali online: Firestore SDK reconnect, listener menerima delta perubahan
+
+---
+
+### Panduan Testing Google Sign-In
+
+#### Testing di Android
+
+```bash
+# 1. Pastikan SHA-1 sudah terdaftar (lihat setup di atas)
+# 2. Jalankan di emulator atau device fisik
+flutter run
+
+# 3. Alur test:
+#    a. Ketuk "Masuk sebagai Tamu" → masuk HomeScreen → tambah beberapa transaksi
+#    b. Buka Settings → ketuk "Masuk dengan Google" → pilih akun
+#    c. Verifikasi: data tamu masih ada + kini ter-sync ke cloud
+#    d. Cek Firebase Console → Authentication → Users (akun baru muncul)
+#    e. Cek Firebase Console → Firestore → users/{uid}/transactions (data tamu diunggah)
+#    f. Ketuk "Keluar" → kembali ke login screen
+#    g. Login Google lagi → data harus tetap ada
+```
+
+#### Testing di Web
+
+```bash
+# 1. Pastikan http://localhost:7357 sudah ada di Authorized JavaScript Origins
+# 2. Jalankan web dev server dengan port tetap (WAJIB)
+flutter run -d chrome --web-hostname localhost --web-port 7357
+
+# 3. Alur test:
+#    a. Mode Tamu: tambah transaksi → berfungsi normal
+#    b. Login Google: klik "Masuk dengan Google" → popup GIS muncul → pilih akun
+#    c. Verifikasi: login berhasil, data lokal ter-migrasi ke Firestore
+#    d. Logout: Settings → Keluar → kembali ke login screen
+```
+
+#### Testing Migrasi Tamu ke Google
+
+```bash
+# 1. Login sebagai tamu → tambah beberapa transaksi, hutang, piutang
+# 2. Buka Settings → Akun → "Masuk dengan Google"
+# 3. Pilih akun Google di popup
+# 4. Verifikasi:
+#    - SnackBar: "Login Google berhasil! Data kamu sudah disinkronkan ke cloud."
+#    - Settings → Akun sekarang menampilkan nama Google + status "Data dicadangkan ke cloud"
+#    - Firebase Console → Firestore → users/{uid}: data tamu sudah ada
+# 5. Keluar → login sebagai tamu lagi dengan UUID baru → data Google tidak hilang
 ```
 
 ---
@@ -377,15 +783,38 @@ service cloud.firestore {
 - [ ] Settings: simpan payday date, berubah di laporan siklus gajian
 - [ ] Logout: kembali ke login screen, sesi bersih
 
-### Firebase (jika diaktifkan)
+### Firebase — Android
 
-- [ ] `kFirebaseConfigured = true` di `lib/firebase_options.dart`
-- [ ] `google-services.json` ada di `android/app/`
+- [ ] SHA-1 debug fingerprint ditambahkan di Firebase Console → Android app
+- [ ] `google-services.json` (terbaru) ada di `android/app/`
+- [x] `android/settings.gradle.kts` — Google Services plugin aktif
+- [x] `android/app/build.gradle.kts` — Google Services plugin aktif
+- [x] `lib/firebase_options.dart` — credentials sudah dikonfigurasi (proyek: sakurapi-aa6ac)
+- [ ] Login Google berhasil di Android — akun muncul di Firebase Console → Authentication
+- [ ] Data tersinkronisasi ke Firestore setelah login Google
+
+### Firebase — iOS
+
 - [ ] `GoogleService-Info.plist` ada di `ios/Runner/`
-- [ ] Login Google berhasil
-- [ ] Data tersinkronisasi ke Firestore (cek di Firebase Console)
-- [ ] Login ulang di device berbeda → data dipulihkan dari cloud
-- [ ] Logout → data lokal tetap ada, sesi Firebase dibersihkan
+- [ ] Bundle ID di `Info.plist` cocok dengan yang terdaftar di Firebase Console
+- [ ] Login Google berhasil di iOS
+
+### Firebase — Web
+
+- [ ] `http://localhost:7357` sudah ada di Authorized JavaScript Origins (Google Cloud Console)
+- [ ] URL produksi sudah ada di Authorized JavaScript Origins
+- [ ] Login Google berhasil di Chrome (`flutter run -d chrome --web-hostname localhost --web-port 7357`)
+- [ ] GIS popup muncul, bukan error "origin not allowed"
+- [ ] `idToken` tidak kosong — cek DevTools Console untuk log `AuthService.signInWithGoogle`
+
+### Firebase — Umum
+
+- [ ] Authentication → Google provider diaktifkan di Firebase Console
+- [ ] Firestore Database dibuat dengan mode production
+- [ ] Firestore Security Rules diterapkan (hanya user sendiri bisa baca/tulis)
+- [ ] Logout Google → data lokal tetap ada, sesi Firebase dibersihkan
+- [ ] Logout tamu → kembali ke login, data lokal tetap ada
+- [ ] Migrasi tamu ke Google → data lokal muncul di Firestore setelah upgrade
 
 ---
 
@@ -441,16 +870,57 @@ Atau tambahkan migrasi yang benar di `app_database.dart` tanpa uninstall.
 
 ### Error "Firebase not initialized"
 
-- Pastikan `kFirebaseConfigured = true` di `lib/firebase_options.dart`
+- Pastikan `google-services.json` sinkron (download ulang dari Firebase Console setelah menambahkan SHA-1)
 - Pastikan `google-services.json` ada di `android/app/`
 - Jalankan `flutter clean && flutter pub get` lalu build ulang
 
-### Google Sign-In gagal "PlatformException: sign_in_failed"
+### Google Sign-In gagal "PlatformException: sign_in_failed" atau "ApiException: 10" (Android)
 
-- Pastikan SHA-1 fingerprint sudah ditambahkan di Firebase Console → Project Settings → Android App
-- Untuk debug: `keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android -keypass android`
-- Salin SHA-1 dan tambahkan di Firebase Console
+Ini adalah error paling umum di Android. Penyebab dan solusinya:
+
+1. **SHA-1 belum terdaftar** — penyebab paling sering:
+   ```bash
+   keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android -keypass android
+   ```
+   Salin SHA-1 → Firebase Console → Project Settings → Android app → Add fingerprint.
+
+2. **`google-services.json` tidak sinkron** — download ulang dari Firebase Console
+   setelah menambahkan SHA-1, lalu replace `android/app/google-services.json`.
+
+3. **Plugin Google Services belum diaktifkan** — pastikan baris di
+   `android/settings.gradle.kts` dan `android/app/build.gradle.kts` sudah di-uncomment.
+
+4. **OAuth consent screen belum dikonfigurasi** — di Google Cloud Console
+   pastikan consent screen sudah disetup dan test user ditambahkan jika masih dalam
+   mode "Testing".
+
+### Google Sign-In gagal di Web — `idToken` kosong atau popup tertutup
+
+1. **Port tidak tetap** — penyebab paling sering `idToken` kosong:
+   - GIS mencocokkan origin secara eksplisit; port acak tidak cocok.
+   - Selalu jalankan: `flutter run -d chrome --web-hostname localhost --web-port 7357`
+   - Pastikan `http://localhost:7357` (bukan `http://localhost`) ada di Authorized JavaScript Origins.
+
+2. **Authorized JavaScript origins belum dikonfigurasi atau salah**:
+   - Buka Google Cloud Console → APIs & Services → Credentials → Web Client
+   - Tambahkan `http://localhost:7357` → Simpan → tunggu 1–2 menit → coba lagi
+
+3. **Error assertion "appClientId != null"** — Web Client ID tidak terbaca oleh plugin:
+   - `web/index.html` berisi placeholder, bukan nilai nyata. Inject terlebih dahulu:
+     ```bash
+     GOOGLE_WEB_CLIENT_ID=xxx.apps.googleusercontent.com bash scripts/inject_web_client_id.sh
+     ```
+   - Dapatkan nilai nyata dari Firebase Console → sakurapi-aa6ac → Project Settings → Web App → Web Client ID
+   - Setelah inject, jalankan: `flutter clean && flutter run -d chrome --web-hostname localhost --web-port 7357`
+
+4. **`accessToken` null di web adalah normal** — jangan treat ini sebagai error.
+   GIS hanya menjamin `idToken`. Kode sudah menghandle ini dengan benar.
+
+### Google Sign-In error "sign_in_cancelled"
+
+Pengguna menutup dialog pemilih akun. Ini bukan error — aplikasi akan kembali ke
+layar login dengan pesan "Login dibatalkan".
 
 ---
 
-*Dokumen ini terakhir diperbarui: 17 April 2026*
+*Dokumen ini terakhir diperbarui: 26 April 2026 — refactor Web Client ID: placeholder di web/index.html, inject via scripts/inject_web_client_id.sh, --dart-define untuk native*

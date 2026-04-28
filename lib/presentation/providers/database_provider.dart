@@ -1,7 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../core/services/auth_service.dart';
+import '../../core/services/cloud_restore_service.dart';
+import '../../core/services/realtime_sync_service.dart';
 import '../../core/services/sync_service.dart';
 import '../../data/database/app_database.dart';
 import '../../data/database/daos/category_dao.dart';
@@ -23,22 +24,24 @@ import '../../domain/repositories/i_transaction_repository.dart';
 //
 //  sharedPreferencesProvider  ← di-override di main() via ProviderScope
 //       │
-//       └─► settingsRepositoryProvider
-//           authServiceProvider  (di auth_provider.dart)
+//       ├─► settingsRepositoryProvider
+//       ├─► authServiceProvider  (di auth_provider.dart)
+//       └─► syncServiceProvider  ← userId dan auth mode dibaca lazy dari prefs
 //
 //  appDatabaseProvider  ← satu instance AppDatabase per masa hidup ProviderScope
 //       │
-//       ├─► categoryDaoProvider
-//       │       └─► categoryRepositoryProvider
-//       ├─► transactionDaoProvider
-//       │       └─► transactionRepositoryProvider
-//       ├─► hutangDaoProvider
-//       │       └─► hutangRepositoryProvider
-//       └─► piutangDaoProvider
-//               └─► piutangRepositoryProvider
+//       ├─► categoryDaoProvider  → categoryRepositoryProvider
+//       │                           └─► syncServiceProvider (write-to-cloud)
+//       ├─► transactionDaoProvider → transactionRepositoryProvider (+ sync)
+//       ├─► hutangDaoProvider → hutangRepositoryProvider (+ sync)
+//       └─► piutangDaoProvider → piutangRepositoryProvider (+ sync)
 //
-// Semua provider fitur (transaction_provider, hutang_provider, …) mengawasi
-// provider repository di atas — tidak pernah langsung ke DAO atau DB provider.
+//  realtimeSyncServiceProvider  ← listener Firestore → tulis langsung ke DAO
+//       ├─► categoryDaoProvider
+//       ├─► transactionDaoProvider
+//       ├─► hutangDaoProvider
+//       └─► piutangDaoProvider
+//       [diaktifkan oleh _RealtimeSyncHandler di app.dart via currentUserProvider]
 
 // ── SharedPreferences ────────────────────────────────────────────────────────
 
@@ -50,11 +53,6 @@ final sharedPreferencesProvider = Provider<SharedPreferences>(
 // ── Database ─────────────────────────────────────────────────────────────────
 
 /// Satu-satunya instance Drift [AppDatabase] sepanjang masa hidup aplikasi.
-///
-/// [ref.onDispose] memastikan koneksi SQLite ditutup saat [ProviderScope]
-/// di-dispose (shutdown aplikasi atau teardown test).
-/// Dalam widget test, override provider ini dengan [AppDatabase(NativeDatabase.memory())]
-/// agar tidak menyentuh file on-disk sungguhan.
 final appDatabaseProvider = Provider<AppDatabase>((ref) {
   final db = AppDatabase();
   ref.onDispose(db.close);
@@ -79,6 +77,47 @@ final piutangDaoProvider = Provider<PiutangDao>(
   (ref) => ref.watch(appDatabaseProvider).piutangDao,
 );
 
+// ── Sync Service ──────────────────────────────────────────────────────────────
+
+/// SyncService membaca userId dan auth mode secara lazy dari SharedPreferences.
+///
+/// Karena lazy, SyncService otomatis aktif setelah Google Sign-In —
+/// tidak perlu invalidate atau recreate provider. Setiap kali [isAvailable]
+/// diperiksa (saat insert/update/delete), nilai terbaru dari prefs digunakan.
+final syncServiceProvider = Provider<SyncService>((ref) {
+  final prefs = ref.watch(sharedPreferencesProvider);
+  return SyncService(prefs: prefs);
+});
+
+/// Layanan yang mengambil semua data pengguna dari Firestore dan memulihkannya
+/// ke SQLite lokal. Dipanggil saat login (Google / Email Link) berhasil.
+final cloudRestoreServiceProvider = Provider<CloudRestoreService>((ref) {
+  return CloudRestoreService(
+    sync: ref.watch(syncServiceProvider),
+    categoryDao: ref.watch(categoryDaoProvider),
+    transactionDao: ref.watch(transactionDaoProvider),
+    hutangDao: ref.watch(hutangDaoProvider),
+    piutangDao: ref.watch(piutangDaoProvider),
+  );
+});
+
+/// Listener Firestore realtime untuk sinkronisasi multi-perangkat.
+///
+/// Provider ini menyediakan instance [RealtimeSyncService] yang siap digunakan.
+/// Listener-nya diaktifkan/dinonaktifkan secara eksplisit oleh widget
+/// [_RealtimeSyncHandler] di `app.dart` berdasarkan perubahan auth state.
+/// Provider memanggil [stopListening] otomatis saat di-dispose.
+final realtimeSyncServiceProvider = Provider<RealtimeSyncService>((ref) {
+  final service = RealtimeSyncService(
+    categoryDao: ref.watch(categoryDaoProvider),
+    transactionDao: ref.watch(transactionDaoProvider),
+    hutangDao: ref.watch(hutangDaoProvider),
+    piutangDao: ref.watch(piutangDaoProvider),
+  );
+  ref.onDispose(service.stopListening);
+  return service;
+});
+
 // ── Repositories ─────────────────────────────────────────────────────────────
 
 final settingsRepositoryProvider = Provider<ISettingsRepository>(
@@ -86,34 +125,34 @@ final settingsRepositoryProvider = Provider<ISettingsRepository>(
 );
 
 final categoryRepositoryProvider = Provider<ICategoryRepository>(
-  (ref) => CategoryRepositoryImpl(ref.watch(categoryDaoProvider)),
+  (ref) => CategoryRepositoryImpl(
+    ref.watch(categoryDaoProvider),
+    ref.watch(syncServiceProvider),
+  ),
 );
 
+/// TransactionRepositoryImpl menerima SyncService untuk sinkronisasi cloud
+/// otomatis pada setiap insert/update/delete.
 final transactionRepositoryProvider = Provider<ITransactionRepository>(
   (ref) => TransactionRepositoryImpl(
     ref.watch(transactionDaoProvider),
     ref.watch(categoryDaoProvider),
+    ref.watch(syncServiceProvider),
   ),
 );
 
+/// HutangRepositoryImpl menerima SyncService untuk sinkronisasi cloud otomatis.
 final hutangRepositoryProvider = Provider<IHutangRepository>(
-  (ref) => HutangRepositoryImpl(ref.watch(hutangDaoProvider)),
+  (ref) => HutangRepositoryImpl(
+    ref.watch(hutangDaoProvider),
+    ref.watch(syncServiceProvider),
+  ),
 );
 
+/// PiutangRepositoryImpl menerima SyncService untuk sinkronisasi cloud otomatis.
 final piutangRepositoryProvider = Provider<IPiutangRepository>(
-  (ref) => PiutangRepositoryImpl(ref.watch(piutangDaoProvider)),
+  (ref) => PiutangRepositoryImpl(
+    ref.watch(piutangDaoProvider),
+    ref.watch(syncServiceProvider),
+  ),
 );
-
-// ── Sync Service ──────────────────────────────────────────────────────────────
-
-/// Menyediakan [SyncService] untuk sinkronisasi cloud (Firestore).
-///
-/// Membaca userId dari [AuthService] yang sudah ada di SharedPreferences.
-/// Jika pengguna mode tamu atau Firebase belum dikonfigurasi, SyncService
-/// tetap dibuat tetapi semua operasinya langsung mengembalikan tanpa aksi.
-final syncServiceProvider = Provider<SyncService>((ref) {
-  final prefs = ref.watch(sharedPreferencesProvider);
-  final authService = AuthService(prefs);
-  final userId = authService.getCurrentUserId();
-  return SyncService(userId: userId);
-});

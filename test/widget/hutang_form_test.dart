@@ -27,6 +27,7 @@ import 'package:finance_tracker/core/constants/app_strings.dart';
 import 'package:finance_tracker/domain/entities/hutang_entity.dart';
 import 'package:finance_tracker/presentation/features/hutang/hutang_form_screen.dart';
 import 'package:finance_tracker/presentation/providers/database_provider.dart';
+import 'package:finance_tracker/presentation/providers/hutang_provider.dart';
 import 'package:finance_tracker/presentation/providers/transaction_provider.dart';
 
 import '../helpers/test_helpers.dart';
@@ -45,7 +46,7 @@ Widget _buildForm({
     routes: [
       GoRoute(
         path: '/',
-        builder: (ctx, st) => HutangFormScreen(editHutang: editHutang),
+        builder: (_, __) => HutangFormScreen(editHutang: editHutang),
       ),
     ],
   );

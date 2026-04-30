@@ -42,9 +42,13 @@
 
             <!-- Deep link untuk Firebase Email Sign-In Link.
                  android:autoVerify="true" → Android App Link (tidak ada dialog "buka dengan").
-                 Domain sakurapi-aa6ac.firebaseapp.com otomatis menyajikan assetlinks.json
+                 Domain [PROJECT-ID].firebaseapp.com otomatis menyajikan assetlinks.json
                  melalui Firebase Hosting sehingga verifikasi App Link berfungsi.
-                 Pastikan SHA-1 & SHA-256 sidik jari kunci sudah terdaftar di Firebase Console. -->
+                 Pastikan SHA-1 & SHA-256 sidik jari kunci sudah terdaftar di Firebase Console.
+
+                 ⚠ DEVELOPER BARU: Ganti "sakurapi-aa6ac" di bawah dengan
+                 Project ID Firebase milik Anda (format: [project-id].firebaseapp.com).
+                 Project ID dapat dilihat di Firebase Console → Project Settings. -->
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT"/>

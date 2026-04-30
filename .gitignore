@@ -59,21 +59,28 @@ android/key.properties
 *.mobileprovision
 
 # =========================
-# Firebase platform config files
-# Berisi OAuth client IDs, SHA-1 certificate hash, dan API keys client-side.
-# Meskipun bukan secret sejati (nilai ini juga ada di APK/IPA setelah build),
-# file ini sebaiknya tidak di-commit agar tiap developer/environment
-# men-download versi terbaru dari Firebase Console.
+# Firebase — konfigurasi klien (gitignored)
 #
-# Cara mendapatkan kembali:
-#   Android : Firebase Console → Project Settings → google-services.json
-#   iOS     : Firebase Console → Project Settings → GoogleService-Info.plist
-#   Dart    : jalankan `flutterfire configure` (regenerate lib/firebase_options.dart)
+# File-file ini berisi konfigurasi Firebase yang spesifik untuk setiap
+# project/developer. Tidak di-commit agar setiap developer menggunakan
+# project Firebase mereka sendiri dan repository aman dipublikasikan.
 #
-# Template tersedia di:
+# Cara mendapatkan/membuat:
+#   Dart    : salin lib/firebase_options.example.dart → lib/firebase_options.dart
+#             lalu isi nilai dari Firebase Console, ATAU jalankan:
+#               dart pub global activate flutterfire_cli
+#               flutterfire configure
+#   Android : Firebase Console → Project Settings → Android app → Download
+#             → letakkan di android/app/google-services.json
+#   iOS     : Firebase Console → Project Settings → iOS app → Download
+#             → letakkan di ios/Runner/GoogleService-Info.plist
+#
+# Template (placeholder, tidak ada nilai nyata) tersedia di:
+#   lib/firebase_options.example.dart
 #   android/app/google-services.example.json
 #   ios/Runner/GoogleService-Info.example.plist
 # =========================
+lib/firebase_options.dart
 android/app/google-services.json
 ios/Runner/GoogleService-Info.plist
 

@@ -79,14 +79,19 @@ dart run build_runner build --delete-conflicting-outputs
 flutter run
 ```
 
-Aplikasi langsung berjalan dalam mode lokal/tamu tanpa konfigurasi tambahan.
+Aplikasi langsung berjalan dalam **mode lokal/tamu** tanpa konfigurasi tambahan.
+
+Untuk fitur **Google Sign-In, Email Link, dan cloud sync**, konfigurasi Firebase
+dengan project milik Anda sendiri diperlukan — lihat [§Konfigurasi Firebase](#konfigurasi-firebase).
 
 ---
 
 ## §3 — Firebase & Google Login
 
-Firebase sudah dikonfigurasi di proyek ini (proyek: `sakurapi-aa6ac`).
-Tombol **Masuk dengan Google** langsung melakukan login nyata.
+> **⚠ Konfigurasi diperlukan**: Fitur ini memerlukan project Firebase **milik Anda sendiri**.
+> Lihat [§Konfigurasi Firebase](#konfigurasi-firebase) di bawah untuk panduan setup lengkap.
+
+Firebase Auth digunakan untuk Google Sign-In, Email Link sign-in, dan cloud sync via Firestore.
 
 ### Package Firebase yang Digunakan
 
@@ -137,8 +142,8 @@ Google Sign-In pada Android memerlukan SHA-1 fingerprint terdaftar di Firebase C
 
 ```
 [1] Dapatkan SHA-1 debug key (perintah di bawah)
-[2] Firebase Console → sakurapi-aa6ac → Project Settings
-    → Android app (com.financetracker.finance_tracker) → Add fingerprint → paste SHA-1
+[2] Firebase Console → [Project Anda] → Project Settings
+    → Android app → Add fingerprint → paste SHA-1
 [3] Download ulang google-services.json → android/app/google-services.json
 [4] flutter run → test Login Google
 ```
@@ -163,13 +168,13 @@ Login Google di web menggunakan `FirebaseAuth.signInWithPopup(GoogleAuthProvider
 
 **Setup satu kali untuk development:**
 
-1. Buka [console.cloud.google.com](https://console.cloud.google.com) → proyek `sakurapi-aa6ac`
+1. Buka [console.cloud.google.com](https://console.cloud.google.com) → project Firebase Anda
 2. **APIs & Services → Credentials → OAuth 2.0 Client IDs** → klik Web Client (auto-created by Firebase)
 3. Di **Authorized JavaScript origins**, tambahkan:
    - `http://localhost` (atau `http://localhost:7357` jika ingin port eksplisit)
 4. Di **Authorized redirect URIs**, pastikan ada:
-   - `https://sakurapi-aa6ac.firebaseapp.com/__/auth/handler`
-5. Inject Web Client ID ke `web/index.html` (lihat §Konfigurasi di bawah)
+   - `https://[PROJECT-ID].firebaseapp.com/__/auth/handler`
+5. Inject Web Client ID ke `web/index.html` (lihat §Web Client ID di bawah)
 6. **Save** → jalankan:
 
 ```bash
@@ -234,7 +239,7 @@ flutter test test/unit/usecases/hutang_payment_integration_test.dart
 lib/
 ├── main.dart               — Entry point, Firebase init, ProviderScope
 ├── app.dart                — MaterialApp.router, tema, locale
-├── firebase_options.dart   — Konfigurasi Firebase (generated)
+├── firebase_options.dart   — Konfigurasi Firebase (gitignored — salin dari firebase_options.example.dart)
 ├── router/                 — GoRouter: semua rute aplikasi
 ├── core/
 │   ├── constants/          — AppStrings, AppColors, SystemCategories
@@ -271,80 +276,116 @@ Kategori berikut dikelola oleh sistem (ID tetap, tidak bisa dihapus):
 
 ---
 
-## Konfigurasi & Keamanan
+## Konfigurasi Firebase
 
-### File konfigurasi Firebase
+> **Konfigurasi Firebase harus disesuaikan dengan akun/project Firebase milik Anda sendiri.**
+> Jangan commit nilai asli ke repository publik.
+> Gunakan file contoh/placeholder yang tersedia.
 
-Proyek ini menggunakan Firebase. File konfigurasi platform berikut ada di `.gitignore`
-dan **tidak di-commit ke repository**:
+Proyek ini memerlukan project Firebase **milik Anda sendiri**. Semua file konfigurasi
+Firebase ada di `.gitignore` dan **tidak disertakan di repository** — setiap developer
+wajib menyiapkan konfigurasi mereka sendiri.
 
-| File | Platform | Cara Mendapatkan |
-|------|----------|------------------|
-| `android/app/google-services.json` | Android | Firebase Console → Project Settings → Android app → Download |
-| `ios/Runner/GoogleService-Info.plist` | iOS | Firebase Console → Project Settings → iOS app → Download |
+### File yang diperlukan (gitignored, tidak ada di repository)
 
-Template (tanpa nilai nyata) tersedia di:
-- `android/app/google-services.example.json`
-- `ios/Runner/GoogleService-Info.example.plist`
+| File | Platform | Template tersedia di |
+|------|----------|---------------------|
+| `lib/firebase_options.dart` | Semua platform | `lib/firebase_options.example.dart` |
+| `android/app/google-services.json` | Android | `android/app/google-services.example.json` |
+| `ios/Runner/GoogleService-Info.plist` | iOS | `ios/Runner/GoogleService-Info.example.plist` |
 
-File `lib/firebase_options.dart` **sengaja di-commit** agar proyek bisa langsung
-di-build setelah clone. Berisi public client config (bukan secret).
+### Langkah Setup Firebase (satu kali)
 
-### Tentang Firebase API Keys & OAuth Client IDs
+**Opsi A — FlutterFire CLI (direkomendasikan):**
 
-Firebase API keys dan OAuth Client IDs di proyek ini bukan secret server-side.
-Nilai-nilai ini memang tertanam di dalam APK/IPA setelah build dan dirancang
-untuk publik oleh Google. Keamanan data diatur via Firebase Security Rules,
-bukan dengan menyembunyikan keys.
+```bash
+# 1. Buat project di https://console.firebase.google.com
+#    Tambahkan app Android, iOS, dan/atau Web ke project Anda
 
-Meski bukan secret, untuk menjaga kebersihan source yang di-commit, Web Client ID
-**tidak** di-hardcode langsung di source file yang di-commit. Gunakan pendekatan
-di bawah untuk menyediakan nilai secara lokal.
+# 2. Install FlutterFire CLI dan login
+dart pub global activate flutterfire_cli
+firebase login
 
-Lihat [`docs/CONFIG_AND_SECRET_AUDIT.txt`](docs/CONFIG_AND_SECRET_AUDIT.txt) untuk
-penjelasan lengkap, inventaris semua nilai yang ditemukan, dan panduan keamanan.
+# 3. Generate lib/firebase_options.dart secara otomatis
+flutterfire configure
+```
+
+**Opsi B — Manual dari Firebase Console:**
+
+```bash
+# 1. Salin template ke file yang sebenarnya
+cp lib/firebase_options.example.dart lib/firebase_options.dart
+
+# 2. Buka Firebase Console → [Project Anda] → Project Settings → General
+#    Isi setiap nilai YOUR_... di lib/firebase_options.dart
+#    dengan nilai nyata dari Firebase Console
+
+# 3. Download dan letakkan file config platform:
+#    google-services.json  → android/app/
+#    GoogleService-Info.plist → ios/Runner/
+```
+
+**Langkah Firebase Console (wajib):**
+1. Aktifkan Authentication → Sign-in methods: **Google** dan **Email/Link** (passwordless)
+2. Buat **Firestore Database** (production mode)
+3. Terapkan Firestore Security Rules (lihat di bawah)
+4. Daftarkan SHA-1 fingerprint untuk Google Sign-In Android (lihat §Setup Android)
+
+### Firestore Security Rules (wajib untuk produksi)
+
+```javascript
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{userId}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+  }
+}
+```
 
 ### Web Client ID — Konfigurasi Lokal
 
 `web/index.html` berisi placeholder `YOUR_GOOGLE_WEB_CLIENT_ID.apps.googleusercontent.com`
 yang perlu diganti dengan nilai nyata sebelum menjalankan atau build web.
 
-**⚠ Jujur soal keamanan:** OAuth Client ID adalah konfigurasi klien publik. Nilai ini
-akan terlihat di source HTML yang dikirim ke browser setelah inject — tidak dapat
-disembunyikan dari pengguna. Tujuan pendekatan ini adalah **kebersihan source yang
-di-commit**, bukan menyembunyikan nilai.
-
-**Langkah untuk development lokal (web):**
+> OAuth Client ID adalah konfigurasi klien publik yang akan terlihat di source HTML
+> yang dikirim ke browser. Tujuan placeholder ini hanya menjaga kebersihan source
+> yang di-commit, bukan menyembunyikan nilai.
 
 ```bash
-# 1. Dapatkan Web Client ID dari Firebase Console → sakurapi-aa6ac
-#    → Project Settings → Web App → OAuth 2.0 client ID
-#    ATAU: Google Cloud Console → APIs & Services → Credentials →
-#    "Web client (auto created by Google Service)"
-
-# 2. Inject nilai ke web/index.html
+# Inject Web Client ID ke web/index.html sebelum run/build
 GOOGLE_WEB_CLIENT_ID=xxx.apps.googleusercontent.com bash scripts/inject_web_client_id.sh
 
-# 3. Jalankan
+# Jalankan web
 flutter run -d chrome --web-hostname localhost --web-port 7357
 
-# 4. Setelah selesai, kembalikan placeholder agar tidak ter-commit
+# Kembalikan placeholder setelah selesai agar tidak ter-commit
 git checkout web/index.html
 ```
 
-**Untuk native (Android/iOS)**, gunakan `--dart-define`:
+Untuk native Android/iOS, gunakan `--dart-define`:
 
 ```bash
-flutter run \
-  --dart-define=GOOGLE_WEB_CLIENT_ID=xxx.apps.googleusercontent.com
-
-flutter build apk --release \
-  --dart-define=GOOGLE_WEB_CLIENT_ID=xxx.apps.googleusercontent.com
+flutter run --dart-define=GOOGLE_WEB_CLIENT_ID=xxx.apps.googleusercontent.com
+flutter build apk --release --dart-define=GOOGLE_WEB_CLIENT_ID=xxx.apps.googleusercontent.com
 ```
 
-Nilai `_webClientId` di `auth_service.dart` dibaca dari `--dart-define` atau
-default ke placeholder jika tidak disediakan (native Google Sign-In akan gagal
-jika placeholder digunakan tanpa penggantian).
+Dapatkan Web Client ID dari: Firebase Console → [Project Anda] → Project Settings
+→ Web App → OAuth 2.0 client ID, **ATAU** Google Cloud Console → APIs & Services
+→ Credentials → "Web client (auto created by Google Service)".
+
+### Tentang Firebase API Keys
+
+Firebase client config (apiKey, appId, dll.) bukan secret server-side — nilai ini
+memang tertanam di APK/IPA setelah build dan dirancang untuk publik oleh Google.
+Keamanan diatur via Firebase Security Rules, bukan dengan menyembunyikan keys.
+
+Meski bukan secret, semua konfigurasi Firebase dijaga di luar git agar setiap
+developer menggunakan project Firebase mereka sendiri dan repository aman dipublikasikan.
+
+Lihat [`docs/CONFIG_AND_SECRET_AUDIT.txt`](docs/CONFIG_AND_SECRET_AUDIT.txt) untuk
+penjelasan teknis lengkap dan panduan keamanan.
 
 ---
 

@@ -3,7 +3,7 @@
 // Widget tests untuk LoginScreen.
 //
 // Covers:
-//   + Render tiga tombol login (Tamu, Google, Email Link)
+//   + Render dua tombol login (Tamu + Google)
 //   + Render judul dan subjudul halaman login
 //   + Login sebagai Tamu berhasil → navigasi ke /home
 //   + Tombol loading tampil saat proses autentikasi
@@ -18,26 +18,16 @@
 //
 // Run: flutter test test/widget/login_screen_test.dart
 
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
-import 'package:mocktail/mocktail.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:finance_tracker/core/constants/app_strings.dart';
-import 'package:finance_tracker/core/services/sync_service.dart';
-import 'package:finance_tracker/data/database/app_database.dart';
 import 'package:finance_tracker/presentation/features/auth/login_screen.dart';
 import 'package:finance_tracker/presentation/providers/database_provider.dart';
-
-// syncServiceProvider membutuhkan FirebaseFirestore.instance saat diinisialisasi.
-// Mock ini menggantikan instance tersebut agar test tidak memerlukan Firebase.initializeApp.
-class _MockFirestore extends Mock implements FirebaseFirestore {}
 
 // ── Helper ────────────────────────────────────────────────────────────────────
 
@@ -47,35 +37,17 @@ Widget _buildApp(SharedPreferences prefs) {
     routes: [
       GoRoute(
         path: '/login',
-        builder: (ctx, st) => const LoginScreen(),
+        builder: (_, __) => const LoginScreen(),
       ),
       GoRoute(
         path: '/home',
-        builder: (ctx, st) => const Scaffold(body: Text('Beranda')),
-      ),
-      GoRoute(
-        path: '/login/email',
-        builder: (ctx, st) => const Scaffold(body: Text('EmailLink')),
+        builder: (_, __) => const Scaffold(body: Text('Beranda')),
       ),
     ],
   );
 
   return ProviderScope(
-    overrides: [
-      sharedPreferencesProvider.overrideWithValue(prefs),
-      // In-memory database agar tidak membuka file SQLite di disk saat test.
-      appDatabaseProvider.overrideWith((ref) {
-        final db = AppDatabase(NativeDatabase.memory());
-        ref.onDispose(db.close);
-        return db;
-      }),
-      // Override syncServiceProvider agar tidak memanggil FirebaseFirestore.instance.
-      // SyncService.isAvailable selalu false untuk guest (mode='guest' atau tidak ada),
-      // sehingga tidak ada operasi Firestore nyata yang dijalankan dalam test ini.
-      syncServiceProvider.overrideWith(
-        (ref) => SyncService(firestore: _MockFirestore(), prefs: prefs),
-      ),
-    ],
+    overrides: [sharedPreferencesProvider.overrideWithValue(prefs)],
     child: MaterialApp.router(
       routerConfig: router,
       localizationsDelegates: const [
@@ -138,16 +110,6 @@ void main() {
       await _pump(tester, prefs);
       expect(find.text(AppStrings.googleSyncNote), findsOneWidget);
     });
-
-    testWidgets('menampilkan tombol Masuk dengan Email', (tester) async {
-      await _pump(tester, prefs);
-      expect(find.text(AppStrings.loginWithEmail), findsOneWidget);
-    });
-
-    testWidgets('menampilkan catatan email link', (tester) async {
-      await _pump(tester, prefs);
-      expect(find.text(AppStrings.emailLinkNote), findsOneWidget);
-    });
   });
 
   // ── Guest login — positive ─────────────────────────────────────────────────
@@ -185,34 +147,14 @@ void main() {
   // ── Google login — negative ────────────────────────────────────────────────
 
   group('LoginScreen — google login negatif', () {
-    // Mock google_sign_in channel agar signIn() melempar PlatformException
-    // secara instan — tanpa ini, platform channel menggantung di test.
-    setUp(() {
-      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-          .setMockMethodCallHandler(
-        const MethodChannel('plugins.flutter.io/google_sign_in'),
-        (call) async => throw PlatformException(
-          code: 'sign_in_failed',
-          message: 'Google Sign-In test stub',
-        ),
-      );
-    });
-
-    tearDown(() {
-      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-          .setMockMethodCallHandler(
-        const MethodChannel('plugins.flutter.io/google_sign_in'),
-        null,
-      );
-    });
-
     testWidgets(
-        'tap Masuk dengan Google → dialog error tampil saat gagal',
+        'tap Masuk dengan Google → dialog error tampil saat gagal (platform channel tidak tersedia)',
         (tester) async {
       await _pump(tester, prefs);
 
       await tester.tap(find.text(AppStrings.loginWithGoogle));
       await tester.pump();
+      // Tunggu platform channel throw + catch + showDialog
       await tester.pumpAndSettle(const Duration(seconds: 3));
 
       // Dialog error harus muncul (AlertDialog dengan judul "Login Gagal")
@@ -239,14 +181,14 @@ void main() {
     });
 
     testWidgets(
-        'dialog error memiliki tombol Salin Detail',
+        'dialog error memiliki tombol Salin Error',
         (tester) async {
       await _pump(tester, prefs);
 
       await tester.tap(find.text(AppStrings.loginWithGoogle));
       await tester.pumpAndSettle(const Duration(seconds: 3));
 
-      expect(find.text('Salin Detail'), findsOneWidget);
+      expect(find.text('Salin Error'), findsOneWidget);
     });
   });
 }

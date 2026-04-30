@@ -10,8 +10,9 @@
 #   bash scripts/inject_web_client_id.sh "xxx.apps.googleusercontent.com"
 #
 # Dapatkan nilai dari:
-#   Firebase Console → sakurapi-aa6ac → Project Settings → Web App → Web Client ID
-#   ATAU: Google Cloud Console → APIs & Services → Credentials → Web client (auto created by Google Service)
+#   Firebase Console → [Project Anda] → Project Settings → Web App → Web Client ID
+#   ATAU: Google Cloud Console → [Project Anda] → APIs & Services → Credentials
+#         → Web client (auto created by Google Service)
 #
 # CATATAN: Web Client ID adalah public client config, BUKAN secret.
 # Nilai ini akan terlihat di source HTML yang dikirim ke browser setelah inject.
@@ -37,7 +38,7 @@ if [ -z "$WEB_CLIENT_ID" ]; then
   echo "  GOOGLE_WEB_CLIENT_ID=xxx.apps.googleusercontent.com bash $0"
   echo "  bash $0 \"xxx.apps.googleusercontent.com\""
   echo ""
-  echo "Dapatkan nilai dari Firebase Console → sakurapi-aa6ac → Project Settings → Web App"
+  echo "Dapatkan nilai dari Firebase Console → [Project Anda] → Project Settings → Web App"
   exit 1
 fi
 

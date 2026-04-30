@@ -55,25 +55,28 @@ flutter pub get
 
 ### 2b. Setup File Konfigurasi Firebase (wajib untuk fitur Google Sign-In)
 
-File `android/app/google-services.json` dan `ios/Runner/GoogleService-Info.plist`
-ada di `.gitignore` dan **tidak ikut di-commit**. Kamu perlu men-download-nya sendiri.
+> **⚠ Wajib menggunakan project Firebase Anda sendiri.**
+> Semua file konfigurasi Firebase ada di `.gitignore` — tidak disertakan di repository.
 
-**Android:**
-1. Buka [console.firebase.google.com](https://console.firebase.google.com) → proyek `sakurapi-aa6ac`
-2. Project Settings → tab "Your apps" → Android app (`com.financetracker.finance_tracker`)
-3. Klik **Download google-services.json** → letakkan di `android/app/google-services.json`
+File-file berikut perlu disiapkan sendiri oleh setiap developer:
 
-**iOS:**
-1. Di halaman yang sama → iOS app (`com.financetracker.financeTracker`)
-2. Klik **Download GoogleService-Info.plist** → letakkan di `ios/Runner/GoogleService-Info.plist`
+| File | Cara mendapatkan |
+|------|-----------------|
+| `lib/firebase_options.dart` | Salin `lib/firebase_options.example.dart` → isi nilai, atau `flutterfire configure` |
+| `android/app/google-services.json` | Firebase Console → [Project Anda] → Project Settings → Android app → Download |
+| `ios/Runner/GoogleService-Info.plist` | Firebase Console → [Project Anda] → Project Settings → iOS app → Download |
 
 Template placeholder tersedia di:
+- `lib/firebase_options.example.dart`
 - `android/app/google-services.example.json`
 - `ios/Runner/GoogleService-Info.example.plist`
 
-> **Catatan:** `lib/firebase_options.dart` sengaja di-commit agar proyek bisa
-> langsung di-build. Berisi public client config (bukan secret).
-> Lihat `docs/CONFIG_AND_SECRET_AUDIT.txt` untuk penjelasan lengkap keamanan.
+Cara tercepat — gunakan FlutterFire CLI:
+```bash
+dart pub global activate flutterfire_cli
+firebase login
+flutterfire configure   # generate lib/firebase_options.dart otomatis
+```
 
 > **Tanpa google-services.json:** Build Android akan gagal. Mode tamu tetap bisa
 > ditest di iOS Simulator tanpa GoogleService-Info.plist, tapi Google Sign-In tidak akan jalan.
@@ -294,8 +297,9 @@ Di Xcode:
 ## Firebase & Google Login
 
 Firebase digunakan untuk fitur **Login Google**, **Login Email Link (passwordless)**, dan **sinkronisasi cloud Firestore realtime**.
-Firebase sudah dikonfigurasi di proyek ini (proyek: `sakurapi-aa6ac`).
-Tanpa melengkapi setup di bawah, pengguna dapat menggunakan mode tamu dengan data lokal penuh.
+
+> **Konfigurasi Firebase harus disesuaikan dengan project Firebase milik Anda sendiri.**
+> Tanpa melengkapi setup di bawah, pengguna dapat menggunakan mode tamu dengan data lokal penuh.
 
 ### Package yang Digunakan
 
@@ -393,8 +397,8 @@ Salin nilai **SHA1** dari output (format: `XX:XX:XX:...:XX`).
 
 #### Langkah 2 — Tambahkan SHA-1 di Firebase Console
 
-1. Buka [console.firebase.google.com](https://console.firebase.google.com) → proyek `sakurapi-aa6ac`
-2. **Project Settings** → tab **Your apps** → Android app (`com.financetracker.finance_tracker`)
+1. Buka [console.firebase.google.com](https://console.firebase.google.com) → project Firebase Anda
+2. **Project Settings** → tab **Your apps** → Android app
 3. Klik **Add fingerprint** → paste nilai SHA-1 → **Save**
 
 #### Langkah 3 — Download Ulang google-services.json
@@ -425,14 +429,14 @@ Login Google di web menggunakan `FirebaseAuth.instance.signInWithPopup(GoogleAut
 
 #### Langkah 1 — Daftarkan Authorized Origins di Google Cloud Console
 
-1. Buka [console.cloud.google.com](https://console.cloud.google.com) → pilih proyek `sakurapi-aa6ac`
+1. Buka [console.cloud.google.com](https://console.cloud.google.com) → pilih project Firebase Anda
 2. **APIs & Services → Credentials → OAuth 2.0 Client IDs**
 3. Klik Web Client yang auto-dibuat oleh Firebase (nama biasanya "Web client (auto created by Google Service)")
 4. Di **Authorized JavaScript origins**, tambahkan:
    - `http://localhost` (mencakup semua port, atau gunakan `http://localhost:7357` jika ingin eksplisit)
-   - `https://sakurapi.web.app` ← (atau domain produksimu jika ada)
+   - `https://[domain-produksi-Anda]` ← (URL produksi jika ada)
 5. Di **Authorized redirect URIs**, tambahkan:
-   - `https://sakurapi-aa6ac.firebaseapp.com/__/auth/handler`
+   - `https://[PROJECT-ID].firebaseapp.com/__/auth/handler`
      (biasanya sudah ada — ini digunakan oleh signInWithPopup)
 6. **Save** → tunggu 1–2 menit agar perubahan propagasi
 
@@ -447,7 +451,7 @@ yang perlu diganti dengan nilai nyata sebelum menjalankan di browser.
 > Gunakan `--dart-define` untuk native (Android/iOS); untuk web, gunakan skrip inject.
 
 ```bash
-# Dapatkan Web Client ID dari Firebase Console → sakurapi-aa6ac →
+# Dapatkan Web Client ID dari Firebase Console → [Project Anda] →
 # Project Settings → Web App → OAuth 2.0 client ID
 # ATAU: Google Cloud Console → APIs & Services → Credentials → Web client
 
@@ -496,16 +500,17 @@ dan native Google Sign-In akan gagal dengan error idToken null.
 
 ---
 
-### Setup Firebase Console dari Awal (jika ganti proyek)
+### Setup Firebase Console dari Awal
 
-Jika menggunakan proyek Firebase baru (bukan `sakurapi-aa6ac`), jalankan:
+Setiap developer menggunakan project Firebase mereka sendiri. Jalankan:
 
 ```bash
 dart pub global activate flutterfire_cli
+firebase login
 flutterfire configure
 ```
 
-Ini akan memperbarui `lib/firebase_options.dart` dengan kredensial proyek baru.
+Ini akan membuat `lib/firebase_options.dart` dengan konfigurasi project Firebase Anda.
 Pastikan juga:
 - **Authentication** → **Sign-in method** → aktifkan **Google**
 - **Authentication** → **Sign-in method** → aktifkan **Email/Password** lalu sub-opsi **Email link (passwordless sign-in)**
@@ -789,7 +794,7 @@ flutter run -d chrome --web-hostname localhost --web-port 7357
 - [ ] `google-services.json` (terbaru) ada di `android/app/`
 - [x] `android/settings.gradle.kts` — Google Services plugin aktif
 - [x] `android/app/build.gradle.kts` — Google Services plugin aktif
-- [x] `lib/firebase_options.dart` — credentials sudah dikonfigurasi (proyek: sakurapi-aa6ac)
+- [ ] `lib/firebase_options.dart` — buat dari `lib/firebase_options.example.dart` atau `flutterfire configure`
 - [ ] Login Google berhasil di Android — akun muncul di Firebase Console → Authentication
 - [ ] Data tersinkronisasi ke Firestore setelah login Google
 
@@ -910,7 +915,7 @@ Ini adalah error paling umum di Android. Penyebab dan solusinya:
      ```bash
      GOOGLE_WEB_CLIENT_ID=xxx.apps.googleusercontent.com bash scripts/inject_web_client_id.sh
      ```
-   - Dapatkan nilai nyata dari Firebase Console → sakurapi-aa6ac → Project Settings → Web App → Web Client ID
+   - Dapatkan nilai nyata dari Firebase Console → [Project Anda] → Project Settings → Web App → Web Client ID
    - Setelah inject, jalankan: `flutter clean && flutter run -d chrome --web-hostname localhost --web-port 7357`
 
 4. **`accessToken` null di web adalah normal** — jangan treat ini sebagai error.

@@ -32,6 +32,7 @@ import 'package:finance_tracker/core/constants/app_strings.dart';
 import 'package:finance_tracker/core/constants/system_categories.dart';
 import 'package:finance_tracker/domain/entities/hutang_entity.dart';
 import 'package:finance_tracker/domain/entities/transaction_entity.dart';
+import 'package:finance_tracker/domain/enums/transaction_type.dart';
 import 'package:finance_tracker/presentation/features/transactions/transaction_form_screen.dart';
 import 'package:finance_tracker/presentation/providers/category_provider.dart';
 import 'package:finance_tracker/presentation/providers/database_provider.dart';
@@ -52,7 +53,7 @@ Widget _buildForm({
 
   final router = GoRouter(
     initialLocation: '/',
-    routes: [GoRoute(path: '/', builder: (ctx, st) => TransactionFormScreen(editTransaction: editTransaction))],
+    routes: [GoRoute(path: '/', builder: (_, __) => TransactionFormScreen(editTransaction: editTransaction))],
   );
 
   return ProviderScope(

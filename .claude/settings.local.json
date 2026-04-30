@@ -37,7 +37,8 @@
       "Bash(sed -n 33,57p D:/belajar-pemrograman/project-mandiri/aplikasi/project_ai_claude_apk_android_ios/web/index.html)",
       "Bash(sed -n 31,52p D:/belajar-pemrograman/project-mandiri/aplikasi/project_ai_claude_apk_android_ios/lib/core/services/auth_service.dart)",
       "Bash(node *)",
-      "Bash(xargs ls *)"
+      "Bash(xargs ls *)",
+      "Bash(git rm *)"
     ]
   }
 }

@@ -101,7 +101,7 @@ Aturan ketergantungan: Presentation bergantung ke Domain, Data mengimplementasik
 lib/
 ├── main.dart                    ← TITIK MASUK aplikasi
 ├── app.dart                     ← Widget root, MaterialApp.router
-├── firebase_options.dart        ← Konfigurasi Firebase (credentials proyek sakurapi-aa6ac)
+├── firebase_options.dart        ← Konfigurasi Firebase (gitignored — salin dari firebase_options.example.dart)
 │
 ├── core/
 │   ├── constants/
@@ -200,7 +200,7 @@ lib/
 Mulai dari sini, baca berurutan:
 
 1. **`lib/main.dart`** — Titik masuk, inisialisasi Firebase, kapan notifikasi dijadwalkan
-2. **`lib/firebase_options.dart`** — Kredensial Firebase untuk proyek `sakurapi-aa6ac`
+2. **`lib/firebase_options.dart`** — Konfigurasi Firebase (gitignored; buat dari `firebase_options.example.dart` atau `flutterfire configure`)
 3. **`lib/app.dart`** — Widget root, bagaimana MaterialApp dirakit
 4. **`lib/router/app_router.dart`** — Semua rute, mana yang pakai shell, mana yang standalone
 5. **`lib/presentation/features/splash/splash_screen.dart`** — Logika keputusan navigasi awal
@@ -246,7 +246,7 @@ Firebase selalu diinisialisasi saat startup via `Firebase.initializeApp()`.
 Jika inisialisasi gagal (offline, dll.), app tetap berjalan dalam mode lokal/tamu.
 Google Sign-In akan gagal dengan pesan error yang jelas jika Firebase tidak tersedia.
 
-Credentials ada di `lib/firebase_options.dart` (proyek: `sakurapi-aa6ac`).
+Konfigurasi Firebase ada di `lib/firebase_options.dart` (gitignored — setiap developer menyiapkan sendiri).
 Lihat [Firebase & Google Sign-In](#mengaktifkan-firebase) untuk detail setup.
 
 ---
@@ -1226,34 +1226,33 @@ ShellRoute → AppShell (bottom nav: Home, Transaksi, Hutang, Piutang, Laporan)
 
 ## Firebase & Google Sign-In
 
-Firebase sudah dikonfigurasi di proyek ini (proyek: `sakurapi-aa6ac`).
-Google Services plugin sudah aktif di Gradle. Konfigurasi publik ada di `lib/firebase_options.dart`.
+> **Konfigurasi Firebase harus disesuaikan dengan project Firebase milik Anda sendiri.**
+> Semua file konfigurasi Firebase ada di `.gitignore` — tidak disertakan di repository.
 
-### Catatan Keamanan Konfigurasi
+Google Services plugin sudah aktif di Gradle. Developer baru wajib menyiapkan
+konfigurasi Firebase sebelum fitur login dan cloud sync dapat digunakan.
 
-File `android/app/google-services.json` dan `ios/Runner/GoogleService-Info.plist`
-ada di `.gitignore` — harus di-download dari Firebase Console.
+### File Konfigurasi yang Diperlukan (Gitignored)
 
-`lib/firebase_options.dart` sengaja di-commit karena berisi **public client config**
-(bukan secret). Firebase API keys di file ini bukan kunci server — keamanan data
-dijaga oleh Firebase Security Rules.
+| File | Template Tersedia Di |
+|---|---|
+| `lib/firebase_options.dart` | `lib/firebase_options.example.dart` |
+| `android/app/google-services.json` | `android/app/google-services.example.json` |
+| `ios/Runner/GoogleService-Info.plist` | `ios/Runner/GoogleService-Info.example.plist` |
 
-Lihat `docs/CONFIG_AND_SECRET_AUDIT.txt` untuk inventaris lengkap semua nilai
-konfigurasi, klasifikasi keamanannya, dan langkah-langkah yang disarankan.
+Cara tercepat: jalankan `flutterfire configure` dengan project Firebase Anda.
 
 ### Setup yang Diperlukan per Platform
 
-| Platform | Yang Perlu Dikonfigurasi | File Terdampak |
-|---|---|---|
-| Android | Download `google-services.json` dari Firebase Console + daftarkan SHA-1 | `android/app/google-services.json` |
-| iOS | Download `GoogleService-Info.plist` dari Firebase Console | `ios/Runner/GoogleService-Info.plist` |
-| Web | Tambahkan `http://localhost` ke Authorized JavaScript Origins di Google Cloud Console | tidak ada perubahan kode |
-
-Template file platform tersedia di:
-- `android/app/google-services.example.json`
-- `ios/Runner/GoogleService-Info.example.plist`
+| Platform | Yang Perlu Dikonfigurasi |
+|---|---|
+| Semua | `lib/firebase_options.dart` (via `flutterfire configure` atau salin dari `.example.dart`) |
+| Android | Download `google-services.json` dari Firebase Console + daftarkan SHA-1 |
+| iOS | Download `GoogleService-Info.plist` dari Firebase Console |
+| Web | Tambahkan `http://localhost` ke Authorized JavaScript Origins di Google Cloud Console |
 
 Panduan lengkap per platform ada di `docs/DEVELOPMENT_TO_DEPLOY.md §Firebase`.
+Lihat `docs/CONFIG_AND_SECRET_AUDIT.txt` untuk detail keamanan konfigurasi.
 
 ### Komponen yang Terlibat dalam Auth
 
@@ -1262,7 +1261,7 @@ Panduan lengkap per platform ada di `docs/DEVELOPMENT_TO_DEPLOY.md §Firebase`.
 | `lib/core/services/auth_service.dart` | Business logic: guest sign-in, Google sign-in, sign-out, sesi |
 | `lib/presentation/providers/auth_provider.dart` | `AuthNotifier` — state auth + migrasi guest ke Google |
 | `lib/core/services/sync_service.dart` | Upload data ke Firestore (aktif hanya mode Google) |
-| `lib/firebase_options.dart` | Firebase credentials per platform |
+| `lib/firebase_options.dart` | Konfigurasi Firebase per platform (gitignored — buat dari `.example.dart`) |
 | `web/index.html` | Tag meta `google-signin-client_id` untuk GIS — berisi placeholder; inject nilai nyata via `scripts/inject_web_client_id.sh` sebelum run/build web |
 
 ### Mengapa SyncService Menggunakan Lazy Reading

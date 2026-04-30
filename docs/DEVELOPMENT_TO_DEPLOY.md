@@ -44,7 +44,7 @@ Pastikan `flutter doctor` menunjukkan semua hijau (atau hanya warning yang tidak
 
 ```bash
 git clone <url-repo>
-cd project_ai_claude_apk_android_ios
+cd <nama-folder-repo>
 ```
 
 ### 2. Pasang Dependensi Flutter

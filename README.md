@@ -67,7 +67,7 @@ Dibuat dengan Flutter untuk Android dan iOS. Tagline: *Kelola Saku, Rapi Keuanga
 ```bash
 # 1. Clone repositori
 git clone <url-repo>
-cd project_ai_claude_apk_android_ios
+cd <nama-folder-repo>
 
 # 2. Pasang dependensi
 flutter pub get

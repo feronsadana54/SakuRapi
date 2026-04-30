@@ -7,6 +7,10 @@ Thumbs.db
 *.tmp
 *.swp
 *.swo
+*.bak
+*.backup
+*.orig
+*~
 
 # =========================
 # IDE / Editor
@@ -16,6 +20,8 @@ Thumbs.db
 *.ipr
 *.iws
 .vscode/
+.fleet/
+*.code-workspace
 
 # =========================
 # Dart / Flutter
@@ -92,11 +98,24 @@ ios/Runner/GoogleService-Info.plist
 *.local
 
 # =========================
-# Claude local files
+# AI / coding-assistant local files (jangan di-commit)
 # =========================
 .claude/
 .claude-cache/
 .claude.json
+.cursor/
+.aider*
+.codeium/
+.continue/
+.windsurf/
+.github/copilot-*
+.gpt-*
 
-
-docs\WEB_TEST_CASES.txt
+# =========================
+# Local scratch / catatan pribadi
+# =========================
+docs/catatan_*.txt
+docs/scratch_*.md
+docs/SCRATCH_*.md
+TODO.local.*
+NOTES.local.*

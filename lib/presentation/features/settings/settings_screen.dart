@@ -130,12 +130,28 @@ class SettingsScreen extends ConsumerWidget {
 
   // ── Logout ────────────────────────────────────────────────────────────────
 
+  /// Logout aman dengan upaya menyelesaikan upload data terakhir ke cloud
+  /// sebelum menghapus sesi.
+  ///
+  /// Alur:
+  ///   1. Konfirmasi pengguna lewat dialog.
+  ///   2. Tampilkan snackbar "Menyinkronkan data terakhir...".
+  ///   3. Panggil [AuthNotifier.signOutSafely] — ia menunggu Firestore
+  ///      `waitForPendingWrites()` dengan timeout 6 detik.
+  ///   4. Setelah selesai (sukses/timeout), navigasi ke layar login.
+  ///
+  /// Bila device offline: timeout akan tercapai, sign-out tetap berlanjut,
+  /// data tetap aman di antrean Firestore offline dan akan terkirim saat
+  /// pengguna login lagi.
   Future<void> _confirmLogout(BuildContext context, WidgetRef ref) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text(AppStrings.logoutTitle),
-        content: const Text(AppStrings.logoutConfirm),
+        content: const Text(
+          'Sebelum keluar, kami akan mencoba menyinkronkan data terakhir ke cloud. '
+          'Apakah kamu yakin ingin keluar?',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -150,8 +166,42 @@ class SettingsScreen extends ConsumerWidget {
       ),
     );
     if (confirmed != true || !context.mounted) return;
-    await ref.read(currentUserProvider.notifier).signOut();
-    if (context.mounted) context.go(AppRoutes.login);
+
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.clearSnackBars();
+    messenger.showSnackBar(const SnackBar(
+      content: Row(
+        children: [
+          SizedBox(
+            width: 16,
+            height: 16,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+            ),
+          ),
+          SizedBox(width: 12),
+          Text('Menyinkronkan data terakhir ke cloud...'),
+        ],
+      ),
+      duration: Duration(seconds: 8),
+      behavior: SnackBarBehavior.floating,
+    ));
+
+    final flushed =
+        await ref.read(currentUserProvider.notifier).signOutSafely();
+
+    if (!context.mounted) return;
+    messenger.clearSnackBars();
+    messenger.showSnackBar(SnackBar(
+      content: Text(flushed
+          ? 'Data terakhir berhasil disinkronkan. Sampai jumpa!'
+          : 'Sinkronisasi tidak selesai (offline/timeout). '
+              'Data lokal tetap aman dan akan terkirim saat login berikutnya.'),
+      behavior: SnackBarBehavior.floating,
+      duration: const Duration(seconds: 3),
+    ));
+    context.go(AppRoutes.login);
   }
 
   // ── Akhiri Sesi Tamu ──────────────────────────────────────────────────────
@@ -823,18 +873,22 @@ class _ReminderCard extends ConsumerWidget {
       ));
       return;
     }
-    final granted =
+    final result =
         await ref.read(notificationToggleProvider.notifier).toggle(enable);
     if (!context.mounted) return;
+    final msg = !result.success
+        ? AppStrings.notifPermissionDenied
+        : !enable
+            ? AppStrings.notifDisabled
+            : result.usingInexactFallback
+                ? AppStrings.notifInexactFallback
+                : AppStrings.notifScheduled;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(
-        granted && enable
-            ? AppStrings.notifScheduled
-            : granted
-                ? AppStrings.notifDisabled
-                : AppStrings.notifPermissionDenied,
-      ),
+      content: Text(msg),
       behavior: SnackBarBehavior.floating,
+      duration: result.usingInexactFallback
+          ? const Duration(seconds: 5)
+          : const Duration(seconds: 3),
     ));
   }
 
@@ -854,11 +908,14 @@ class _ReminderCard extends ConsumerWidget {
     await notifier.setReminderHour(picked.hour);
     await notifier.setReminderMinute(picked.minute);
 
-    await ref.read(notificationToggleProvider.notifier).reschedule();
+    final result =
+        await ref.read(notificationToggleProvider.notifier).reschedule();
 
     if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text(AppStrings.reminderRescheduled),
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(result.usingInexactFallback
+            ? AppStrings.notifInexactFallback
+            : AppStrings.reminderRescheduled),
         behavior: SnackBarBehavior.floating,
       ));
     }

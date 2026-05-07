@@ -388,6 +388,34 @@ Lihat laporan terakhir:
 - Fixture data ada di test/helpers/test_helpers.dart — update jika schema berubah
 - Jika schema database (Drift) berubah, FakeRepository mungkin perlu diperbarui
 
+--------------------------------------------------------------------------------
+8. PERUBAHAN v1.1 — SINKRONISASI & RESTORE
+--------------------------------------------------------------------------------
+
+A. CAKUPAN BARU
+   - test/unit/sync/transaction_restore_test.dart
+       Memvalidasi placeholder kategori "Lainnya" untuk transaksi yang
+       categoryId-nya belum ter-restore, dan stream re-emit setelah kategori
+       asli tiba.
+
+   - test/unit/sync/background_sync_coordinator_test.dart
+       Memvalidasi BackgroundSyncCoordinator: start/stop idempotent,
+       lifecycle resume memicu sync, rate-limit 30 detik aktif.
+
+B. CATATAN UNTUK QA WEB
+   Sinkronisasi Firestore TIDAK diuji oleh test web — Firestore SDK butuh
+   network nyata. Test fokus pada perilaku stream lokal, mapping, dan
+   coordinator. Validasi end-to-end sync wajib dilakukan secara manual
+   pada perangkat Android/iOS sebelum rilis.
+
+C. UJI MANUAL TAMBAHAN UNTUK VERIFIKASI BUG RESTORE RE-LOGIN
+   1. Login Google di perangkat A → tambah 5 transaksi
+   2. Tutup aplikasi total (swipe dari recent apps + remove cache opsional)
+   3. Buka aplikasi lagi
+   4. Verifikasi: HomeScreen menampilkan semua 5 transaksi tanpa kosong
+   5. Verifikasi log: 'AuthNotifier._loadCurrentUser' → '[startup] Sesi
+      tersimpan ditemukan ... memulai restore latar belakang'
+
 ================================================================================
   Akhir dokumen — SakuRapi Web QA Automation
 ================================================================================

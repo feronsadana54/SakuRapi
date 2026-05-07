@@ -17,6 +17,26 @@ class PiutangDao extends DatabaseAccessor<AppDatabase> with _$PiutangDaoMixin {
             ..orderBy([(t) => OrderingTerm.desc(t.createdAt)]))
           .watch();
 
+  /// Stream yang memancar ulang setiap kali tabel `piutang`
+  /// **atau** tabel `payment_history` berubah.
+  ///
+  /// Diperlukan agar daftar piutang di UI ikut diperbarui ketika
+  /// realtime listener Firestore menerima record pembayaran baru tanpa
+  /// menyentuh tabel piutang.
+  Stream<List<PiutangData>> watchAllReactive() async* {
+    Future<List<PiutangData>> fetch() => (select(piutangTable)
+          ..orderBy([(t) => OrderingTerm.desc(t.createdAt)]))
+        .get();
+
+    yield await fetch();
+    final updates = db.tableUpdates(
+      TableUpdateQuery.onAllTables([db.piutangTable, db.paymentHistoryTable]),
+    );
+    await for (final _ in updates) {
+      yield await fetch();
+    }
+  }
+
   Future<List<PiutangData>> getAll() =>
       (select(piutangTable)
             ..orderBy([(t) => OrderingTerm.desc(t.createdAt)]))

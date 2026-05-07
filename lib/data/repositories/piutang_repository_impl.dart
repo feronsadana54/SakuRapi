@@ -18,7 +18,7 @@ class PiutangRepositoryImpl implements IPiutangRepository {
 
   @override
   Stream<List<PiutangEntity>> watchAll() =>
-      _dao.watchAll().asyncMap(_mapRows);
+      _dao.watchAllReactive().asyncMap(_mapRows);
 
   @override
   Future<List<PiutangEntity>> getAll() async {

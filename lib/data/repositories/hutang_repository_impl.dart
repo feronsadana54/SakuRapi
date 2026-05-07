@@ -17,7 +17,7 @@ class HutangRepositoryImpl implements IHutangRepository {
 
   @override
   Stream<List<HutangEntity>> watchAll() =>
-      _dao.watchAll().asyncMap(_mapRows);
+      _dao.watchAllReactive().asyncMap(_mapRows);
 
   @override
   Future<List<HutangEntity>> getAll() async {

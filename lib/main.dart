@@ -107,6 +107,12 @@ Future<void> main() async {
 }
 
 /// Inisialisasi timezone + notifikasi setelah frame pertama.
+///
+/// **Tujuan**: memastikan pengingat tetap terjadwal setiap kali aplikasi
+/// dibuka. `ensureScheduled` murah jika pengingat sudah ada, dan
+/// menjadwalkan ulang otomatis jika sistem (mis. baterai OEM) telah
+/// membersihkannya. Ini memberi pengguna pengalaman yang konsisten
+/// tanpa perlu mengubah pengaturan.
 Future<void> _initBackground(SharedPreferences prefs) async {
   if (_bgInitDone) return;
   _bgInitDone = true;
@@ -134,8 +140,10 @@ Future<void> _initBackground(SharedPreferences prefs) async {
     final minute = await settingsRepo.getReminderMinute();
     final days = await settingsRepo.getReminderDays();
 
+    // ensureScheduled: idempoten — bila pengingat sudah lengkap, no-op;
+    // bila tidak (misal sistem membersihkan jadwal), reschedule otomatis.
     await notificationService
-        .scheduleReminders(hour: hour, minute: minute, weekdays: days)
-        .timeout(const Duration(seconds: 3));
+        .ensureScheduled(hour: hour, minute: minute, weekdays: days)
+        .timeout(const Duration(seconds: 5));
   } catch (_) {}
 }

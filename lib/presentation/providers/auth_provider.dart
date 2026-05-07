@@ -1,6 +1,7 @@
 import 'dart:async' show unawaited;
 import 'dart:developer' as dev;
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/services/auth_service.dart';
@@ -15,9 +16,14 @@ import 'database_provider.dart';
 
 // ── Background sync status ────────────────────────────────────────────────────
 
-/// true selama cloud restore / migrasi berjalan di background setelah login.
+/// true selama cloud restore / migrasi berjalan di background setelah login
+/// atau pada startup ketika sesi sudah ada.
 /// Digunakan oleh [HomeScreen] untuk menampilkan banner "Sedang memulihkan...".
 final isBackgroundSyncingProvider = StateProvider<bool>((ref) => false);
+
+/// Status pengunggahan terakhir saat logout. true selama proses sync-before-logout
+/// berjalan; UI menampilkannya sebagai snackbar di [SettingsScreen].
+final isLogoutSyncingProvider = StateProvider<bool>((ref) => false);
 
 // ── Pending deep link (Email Sign-In) ─────────────────────────────────────────
 
@@ -68,11 +74,40 @@ class AuthNotifier extends StateNotifier<AsyncValue<UserEntity?>> {
     _loadCurrentUser();
   }
 
+  /// Memuat user dari prefs saat aplikasi pertama kali dibuka. Jika user sudah
+  /// terautentikasi (Google / Email Link), restore latar belakang dipicu agar
+  /// SQLite lokal selaras dengan data terbaru di Firestore.
+  ///
+  /// **Kenapa wajib restore di startup**: tanpa ini, perangkat baru atau
+  /// pemasangan ulang yang masih punya sesi tersimpan akan menampilkan UI
+  /// kosong meskipun data utuh ada di cloud, karena listener realtime sendiri
+  /// tidak menjamin kategori tiba sebelum transaksi (race condition).
   Future<void> _loadCurrentUser() async {
+    const tag = 'AuthNotifier._loadCurrentUser';
     try {
       final user = await _service.getCurrentUser();
       state = AsyncData(user);
+
+      if (user != null && user.isAuthenticated) {
+        dev.log(
+          '[startup] Sesi tersimpan ditemukan — '
+          'uid=${user.id}, mode=${user.authMode.name} '
+          '→ memulai restore latar belakang',
+          name: tag,
+        );
+        _ref.read(isBackgroundSyncingProvider.notifier).state = true;
+        unawaited(_restoreBackground(tag, Stopwatch()..start()));
+      } else if (user != null) {
+        dev.log(
+          '[startup] Sesi tamu (uid=${user.id}) — restore dilewati',
+          name: tag,
+        );
+      } else {
+        dev.log('[startup] Tidak ada sesi tersimpan', name: tag);
+      }
     } catch (e, st) {
+      dev.log('[startup] Error memuat sesi: $e',
+          name: tag, level: 1000, error: e, stackTrace: st);
       state = AsyncError(e, st);
     }
   }
@@ -226,14 +261,116 @@ class AuthNotifier extends StateNotifier<AsyncValue<UserEntity?>> {
     }
   }
 
-  // ── Logout ────────────────────────────────────────────────────────────────
+  // ── Sinkronisasi manual (resume / periodic / manual button) ──────────────
 
+  /// Menjalankan satu siklus restore dari Firestore → SQLite untuk pengguna
+  /// yang sedang login (Google / Email Link).
+  ///
+  /// **Kapan dipanggil:**
+  ///   - Aplikasi resume dari background ([BackgroundSyncCoordinator])
+  ///   - Timer periodik 30 menit selama aplikasi terbuka
+  ///   - Jadwal harian (22:00) selama aplikasi terbuka
+  ///   - Tombol "Sinkronkan Sekarang" (jika ditambahkan ke UI)
+  ///
+  /// **Bukan tindakan blocking** — gagal di-swallow, data lokal tetap aman.
+  Future<void> runFullSync({String trigger = 'manual'}) async {
+    const tag = 'AuthNotifier.runFullSync';
+    final user = state.valueOrNull;
+    if (user == null || !user.isAuthenticated) {
+      dev.log('[sync:$trigger] Tidak ada sesi terautentikasi — sync dilewati',
+          name: tag);
+      return;
+    }
+    if (!_sync.isAvailable) return;
+
+    final sw = Stopwatch()..start();
+    dev.log('[sync:$trigger] Memulai full sync (uid=${user.id})', name: tag);
+    try {
+      final result = await _restoreService
+          .restoreFromCloud()
+          .timeout(const Duration(seconds: 30));
+      sw.stop();
+      dev.log(
+        '[sync:$trigger] Selesai (${sw.elapsedMilliseconds}ms) — '
+        '${result.categoriesRestored} kategori, '
+        '${result.transactionsRestored} tx, '
+        '${result.hutangRestored} hutang, '
+        '${result.piutangRestored} piutang, '
+        '${result.paymentsRestored} pembayaran',
+        name: tag,
+      );
+    } catch (e) {
+      dev.log('[sync:$trigger] Gagal (non-fatal): $e', name: tag, level: 900);
+    }
+  }
+
+  // ── Logout (sederhana, tanpa flush) ───────────────────────────────────────
+
+  /// Keluar dari akun tanpa menunggu flush data lokal.
+  ///
+  /// Pakai [signOutSafely] untuk pengalaman yang aman: ia akan mencoba
+  /// menyelesaikan upload Firestore yang masih dalam antrean lokal sebelum
+  /// menghapus sesi. Metode ini tetap ada sebagai fallback.
   Future<void> signOut() async {
     try {
       await _service.signOut();
       state = const AsyncData(null);
     } catch (e, st) {
       state = AsyncError(e, st);
+    }
+  }
+
+  /// Logout aman: menunggu Firestore menyelesaikan tulisan lokal yang masih
+  /// tertahan di antrean offline (`waitForPendingWrites`), lalu sign-out.
+  ///
+  /// **Strategi timeout**: bila device offline atau Firestore lambat,
+  /// menunggu maksimal [flushTimeout] kemudian tetap melanjutkan logout.
+  /// Data yang belum sempat ter-flush akan tetap terkirim oleh Firestore SDK
+  /// pada login berikutnya berkat persistensi offline yang aktif.
+  ///
+  /// Mengembalikan true jika flush berhasil dalam timeout, false jika
+  /// timeout/offline (dalam kedua kasus, sign-out tetap dilakukan).
+  Future<bool> signOutSafely({
+    Duration flushTimeout = const Duration(seconds: 6),
+  }) async {
+    const tag = 'AuthNotifier.signOutSafely';
+    final sw = Stopwatch()..start();
+    var flushed = false;
+
+    _ref.read(isLogoutSyncingProvider.notifier).state = true;
+    try {
+      if (_sync.isAvailable) {
+        try {
+          dev.log('[logout] Menunggu Firestore flush antrean lokal...', name: tag);
+          await FirebaseFirestore.instance
+              .waitForPendingWrites()
+              .timeout(flushTimeout);
+          flushed = true;
+          dev.log(
+            '[logout] Flush selesai dalam ${sw.elapsedMilliseconds}ms',
+            name: tag,
+          );
+        } catch (e) {
+          dev.log(
+            '[logout] Flush gagal/timeout (${sw.elapsedMilliseconds}ms): $e — '
+            'lanjut sign-out, data akan terkirim saat login berikutnya',
+            name: tag,
+            level: 900,
+          );
+        }
+      } else {
+        dev.log('[logout] Sync tidak aktif — langsung sign-out', name: tag);
+      }
+
+      await _service.signOut();
+      state = const AsyncData(null);
+      return flushed;
+    } catch (e, st) {
+      dev.log('[logout] Error: $e', name: tag, level: 1000, error: e, stackTrace: st);
+      state = AsyncError(e, st);
+      return false;
+    } finally {
+      _ref.read(isLogoutSyncingProvider.notifier).state = false;
     }
   }
 

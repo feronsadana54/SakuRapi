@@ -270,4 +270,7 @@ abstract final class AppStrings {
       'Pengingat dinonaktifkan';
   static const String notifNotSupportedOnWeb =
       'Notifikasi tidak didukung di browser. Gunakan aplikasi Android/iOS.';
+  static const String notifInexactFallback =
+      'Pengingat dijadwalkan, tapi izin "Alarm Tepat Waktu" belum aktif. '
+      'Pengingat masih muncul, hanya saja waktunya bisa meleset beberapa menit.';
 }

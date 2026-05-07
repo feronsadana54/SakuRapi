@@ -43,6 +43,30 @@ Dibuat dengan Flutter untuk Android dan iOS. Tagline: *Kelola Saku, Rapi Keuanga
 ### Notifikasi & Pengingat
 - Pengingat harian transaksi (jam dan hari yang bisa dikonfigurasi)
 - Default: 21:00 WIB, semua hari aktif
+- Otomatis dijadwalkan ulang setelah perangkat reboot atau aplikasi diperbarui
+  (via `BootReceiver` yang sudah terdaftar di `AndroidManifest.xml`)
+- Fallback otomatis ke jadwal "inexact" jika izin **Alarm Tepat Waktu** ditolak
+  (Android 12+) — pengingat tetap muncul, hanya saja waktunya bisa meleset
+  beberapa menit
+- Self-healing: setiap aplikasi dibuka, `ensureScheduled()` memastikan pengingat
+  yang aktif tetap terjadwal (mengatasi pembersihan oleh OS / pengoptimalan baterai OEM)
+
+### Sinkronisasi Data Otomatis
+- **Setiap perubahan**: setiap insert/update/delete langsung di-upsert ke Firestore
+  (Firestore SDK punya antrean offline bawaan — data aman meskipun tanpa internet)
+- **Saat aplikasi dibuka**: jika sesi tersimpan ada, restore dari cloud dipicu
+  agar UI selalu terbaru di perangkat baru atau setelah lama tidak dipakai
+- **Saat aplikasi resume dari background**: sync otomatis berjalan
+- **Periodik 30 menit**: timer foreground menjalankan sync selama aplikasi terbuka
+- **Terjadwal harian 22:00**: timer foreground memicu sync (hanya jika aplikasi
+  masih hidup di jam tersebut)
+- **Sebelum logout**: `waitForPendingWrites()` dengan timeout 6 detik memastikan
+  data terakhir terkirim sebelum sesi dihapus
+
+> **Batasan jujur (Android):** Sinkronisasi *tidak dijamin* berjalan ketika
+> aplikasi telah di-force-stop, di-swipe dari recent apps, atau setelah
+> uninstall. Detail teknis dan strategi mitigasi ada di
+> [`docs/CODEBASE_HANDOVER.md` § Background & Sinkronisasi](docs/CODEBASE_HANDOVER.md).
 
 ### UI & Pengalaman Pengguna
 - Material 3 modern dengan tema premium

@@ -26,7 +26,8 @@ class TransactionRepositoryImpl implements ITransactionRepository {
   TransactionRepositoryImpl(this._txDao, this._catDao, this._sync);
 
   @override
-  Stream<List<Transaction>> watchAll() => _txDao.watchAll().asyncMap(_mapRows);
+  Stream<List<Transaction>> watchAll() =>
+      _txDao.watchAllReactive().asyncMap(_mapRows);
 
   @override
   Future<List<Transaction>> getByDateRange(
@@ -88,15 +89,36 @@ class TransactionRepositoryImpl implements ITransactionRepository {
 
   // ── Mappers ──────────────────────────────────────────────────────────
 
+  /// Mengubah baris SQLite menjadi entitas domain [Transaction].
+  ///
+  /// **Strategi kategori "missing":** ketika `categoryId` belum ada di tabel
+  /// kategori lokal (umumnya selama race window restore/realtime — kategori
+  /// belum tiba sementara transaksinya sudah), transaksi TIDAK pernah disaring
+  /// keluar — kita beri kategori placeholder "Lainnya" dengan tipe yang sama.
+  /// Stream `watchAllReactive` akan memancarkan ulang ketika kategori asli
+  /// tiba, sehingga UI akan otomatis ter-refresh dengan label yang benar.
   Future<List<Transaction>> _mapRows(List<TransactionData> rows) async {
     if (rows.isEmpty) return [];
     final catRows = await _catDao.getAll();
     final catMap = {for (final c in catRows) c.id: _catRowToEntity(c)};
     return rows
-        .where((r) => catMap.containsKey(r.categoryId))
-        .map((r) => _toEntity(r, catMap[r.categoryId]!))
+        .map((r) => _toEntity(
+              r,
+              catMap[r.categoryId] ?? _placeholderCategory(r),
+            ))
         .toList();
   }
+
+  /// Kategori sementara untuk transaksi yang kategorinya belum ter-restore.
+  /// Tetap menghormati `id` asli agar saat kategori asli tiba, mapping tetap konsisten.
+  Category _placeholderCategory(TransactionData row) => Category(
+        id: row.categoryId,
+        name: 'Lainnya',
+        iconCode: 0xe5d3, // Icons.help_outline_rounded
+        colorValue: 0xFF78909C,
+        type: CategoryType.fromValue(row.type),
+        isDefault: true,
+      );
 
   Transaction _toEntity(TransactionData row, Category category) => Transaction(
         id: row.id,

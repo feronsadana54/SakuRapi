@@ -17,6 +17,29 @@ class TransactionDao extends DatabaseAccessor<AppDatabase>
             ]))
           .watch();
 
+  /// Stream yang memancar ulang setiap kali tabel `transactions`
+  /// **atau** tabel `categories` berubah.
+  ///
+  /// Penting saat restore/realtime sync: bila transaksi tiba sebelum
+  /// kategori induknya, repository memerlukan emisi ulang ketika
+  /// kategori terakhir tiba — agar UI tidak menampilkan kosong.
+  Stream<List<TransactionData>> watchAllReactive() async* {
+    Future<List<TransactionData>> fetch() => (select(transactionsTable)
+          ..orderBy([
+            (t) => OrderingTerm.desc(t.date),
+            (t) => OrderingTerm.desc(t.createdAt),
+          ]))
+        .get();
+
+    yield await fetch();
+    final updates = db.tableUpdates(
+      TableUpdateQuery.onAllTables([db.transactionsTable, db.categoriesTable]),
+    );
+    await for (final _ in updates) {
+      yield await fetch();
+    }
+  }
+
   Future<List<TransactionData>> getByDateRange(
     int startEpochMs,
     int endEpochMs,

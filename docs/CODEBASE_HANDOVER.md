@@ -498,7 +498,7 @@ Sesi Google juga di-re-validate oleh Firebase SDK secara internal (token refresh
 Sinkronisasi aktif untuk pengguna **Google** dan **Email Link** (`authMode == 'google' || 'emailLink'`).
 Pengguna tamu tidak pernah sync.
 
-### Arsitektur Sync — 3 Lapisan
+### Arsitektur Sync — 4 Lapisan
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
@@ -506,16 +506,27 @@ Pengguna tamu tidak pernah sync.
 │  SyncService.upsertXxx() / deleteXxx()                                          │
 │  Dipanggil via unawaited() dari setiap Repository.insert/update/delete          │
 │  Tidak memblokir UI. Kegagalan ditangani diam-diam (try/catch).                 │
+│  Firestore SDK punya antrean offline bawaan — data aman tanpa internet.         │
 ├─────────────────────────────────────────────────────────────────────────────────┤
-│  LAPISAN 2 — RESTORE ON LOGIN (one-time, background)                            │
+│  LAPISAN 2 — RESTORE ON LOGIN + APP STARTUP                                    │
 │  CloudRestoreService.restoreFromCloud()                                          │
-│  Dipanggil satu kali setelah login berhasil                                     │
+│  Dipanggil:                                                                      │
+│    a. Saat login Google / Email Link berhasil (fresh login)                     │
+│    b. Saat app startup jika sesi tersimpan ada (FIX UTAMA)                      │
 │  Fetch 5 koleksi paralel → tulis ke SQLite dengan strategi merge                │
 ├─────────────────────────────────────────────────────────────────────────────────┤
 │  LAPISAN 3 — REALTIME MULTI-DEVICE SYNC (persistent listeners)                  │
 │  RealtimeSyncService — 5 Firestore snapshots() listeners                        │
 │  Aktif selama pengguna terautentikasi                                            │
 │  Perubahan dari perangkat lain → langsung tulis ke SQLite → UI auto-refresh     │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│  LAPISAN 4 — BACKGROUND SYNC COORDINATOR (foreground only, jujur)              │
+│  BackgroundSyncCoordinator — lifecycle + timer                                  │
+│    a. didChangeAppLifecycleState(resumed)  → sync                               │
+│    b. Timer.periodic(30 menit)             → sync                               │
+│    c. Timer harian 22:00                    → sync (bila aplikasi masih hidup) │
+│    d. signOutSafely() → waitForPendingWrites() sebelum sign-out                │
+│  Rate-limit 30 detik antar sync agar tidak boros jaringan.                      │
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -534,11 +545,13 @@ SyncService
           └─ Kegagalan: try/catch → diabaikan, data lokal tetap aman
 ```
 
-### Lapisan 2 — Restore on Login
+### Lapisan 2 — Restore on Login + App Startup
 
 ```
 CloudRestoreService.restoreFromCloud()
-  ├─ Dipanggil saat: login Google, login Email Link, atau upgrade dari tamu
+  ├─ Dipanggil saat:
+  │   a. login Google, login Email Link, atau upgrade dari tamu
+  │   b. **app startup** dengan sesi tersimpan terautentikasi (FIX UTAMA)
   ├─ Future.wait([5 Firestore fetches]) ← paralel — hemat 4 round-trip jaringan
   │
   ├─ Strategi merge:
@@ -549,6 +562,17 @@ CloudRestoreService.restoreFromCloud()
   │   └─ payment_history: INSERT OR IGNORE (immutable setelah dicatat)
   │
   └─ isBackgroundSyncingProvider = false setelah selesai → banner hilang
+
+📌 KENAPA RESTORE ON STARTUP PENTING (root cause yang lama)
+   Tanpa ini, pengguna yang sudah login dan reopen app hanya
+   mengandalkan realtime listener untuk mendapatkan data. Ada race
+   antara koleksi categories vs transactions — listener kategori bisa
+   datang setelah listener transaksi. Stream watchAll transaksi tidak
+   re-emit ketika hanya kategori yang berubah, jadi UI menampilkan
+   transaksi sebagai "Lainnya" placeholder. Setelah perbaikan dual:
+     1. _loadCurrentUser memicu restoreFromCloud saat startup, dan
+     2. Repository watchAll dibuat reaktif terhadap categoriesTable
+   masalah re-login data tidak muncul terselesaikan secara struktural.
 ```
 
 ### Lapisan 3 — Realtime Multi-Device Sync
@@ -580,15 +604,68 @@ RealtimeSyncService (5 Firestore CollectionReference.snapshots() listeners)
 ```
 Saat device offline:
   ├─ SQLite lokal tetap berfungsi penuh (baca dan tulis)
-  ├─ SyncService.upsertXxx() gagal → diabaikan (data lokal aman)
+  ├─ SyncService.upsertXxx() di-queue oleh Firestore SDK (offline persistence)
   ├─ RealtimeSyncService listener pause otomatis (Firestore SDK handle)
   └─ UI tetap responsif
 
 Saat kembali online:
   ├─ Firestore SDK reconnect otomatis
+  ├─ Antrean tulisan offline ter-flush ke server
   ├─ Listener menerima delta perubahan yang terlewat
   └─ Data disinkronkan tanpa perlu manual refresh
 ```
+
+### Lapisan 4 — Background Sync Coordinator + Sync-Before-Logout
+
+```
+BackgroundSyncCoordinator (lib/core/services/background_sync_coordinator.dart)
+  │
+  ├─ Diatur oleh _BackgroundSyncHandler di app.dart (start saat mount, stop saat dispose)
+  │
+  ├─ Pemicu:
+  │   ├─ WidgetsBindingObserver.didChangeAppLifecycleState(resumed) → sync
+  │   ├─ Timer.periodic(30 menit) → sync
+  │   └─ Timer one-shot harian ke 22:00 WIB → sync (lalu jadwal ulang)
+  │
+  ├─ Rate-limit 30 detik antar sync (kalau dipanggil terlalu cepat → skip)
+  │
+  └─ Setiap pemicu memanggil AuthNotifier.runFullSync(trigger: ...)
+      └─ Ini memanggil CloudRestoreService.restoreFromCloud() dengan timeout 30s
+      └─ Realtime listener sudah aktif paralel; restore service di sini
+         berfungsi sebagai pengaman sinkronisasi penuh saat ada drift
+
+AuthNotifier.signOutSafely(flushTimeout: 6s)
+  ├─ FirebaseFirestore.instance.waitForPendingWrites().timeout(6s)
+  │   └─ Memberi Firestore SDK kesempatan menyelesaikan upload antrean lokal
+  │   └─ Bila timeout (offline / lambat) → tetap lanjut sign-out
+  │   └─ Data yang belum ter-flush tetap aman: Firestore SDK akan kirim ulang
+  │      saat user login kembali (offline persistence)
+  ├─ AuthService.signOut() → Firebase Auth & GoogleSignIn signOut, hapus prefs
+  └─ State → AsyncData(null) → router otomatis arahkan ke /login
+```
+
+### Batasan Background — JUJUR
+
+| Skenario | Sync? | Alasan |
+|---|---|---|
+| Aplikasi dibuka → resume → periodik 30m → 22:00 (saat aplikasi hidup) | ✅ Ya | Foreground timer & lifecycle |
+| Aplikasi tutup tapi proses masih hidup di background OS | ⚠️ Tergantung | OS Android bisa membunuh proses sewaktu-waktu |
+| Aplikasi force-stop / swipe dari recent apps | ❌ Tidak | Proses dibunuh; tidak ada cara membangkitkan tanpa WorkManager |
+| Reboot perangkat | ❌ Tidak (sync) / ✅ Ya (notifikasi) | Sync tidak terjadwal ulang; notifikasi otomatis ulang via BootReceiver |
+| Pengoptimalan baterai OEM (MIUI, One UI, ColorOS, dll.) | ⚠️ Tergantung vendor | Bisa membunuh app secara agresif; pengguna perlu mengizinkan autostart |
+| Uninstall | ❌ Tidak | Tidak ada hook "before uninstall" di Android |
+
+**Mitigasi yang sudah diterapkan:**
+- Setiap perubahan langsung ter-upsert ke Firestore (Lapisan 1)
+- `signOutSafely()` mem-flush antrean sebelum sign-out
+- Setiap aplikasi dibuka, restore otomatis dipanggil (Lapisan 2)
+- `BackgroundSyncCoordinator` aktif di setiap moment foreground
+
+**Bila butuh sync TRUE BACKGROUND** (saat aplikasi tertutup):
+Tambahkan plugin `workmanager` (https://pub.dev/packages/workmanager).
+Alur: registerPeriodicTask → callback dispatcher menjalankan
+`runFullSync()`. Ini di luar scope v1 karena membutuhkan setup native
+Kotlin/Swift dan tetap tidak menjamin pada OEM yang restriktif.
 
 **Struktur Firestore:**
 ```
@@ -968,24 +1045,77 @@ Siklus gajian dihitung oleh `AppDateUtils.getPaydayCycle(paydayDate, now)`.
 ## Alur Notifikasi & Pengingat
 
 ```
-main.dart (addPostFrameCallback)
-  └─ SettingsRepository.getNotificationSettings()
+main.dart._initBackground (addPostFrameCallback)
+  └─ tz.initializeTimeZones() + setLocalLocation('Asia/Jakarta')
+  └─ SettingsRepositoryImpl.getNotificationSettings()
       └─ notifEnabled, hour, minute, weekdays
   └─ Jika notifEnabled:
-      └─ NotificationService.scheduleReminders(hour, minute, weekdays)
-          └─ flutter_local_notifications
+      └─ NotificationService.initialize() (membuat channel sekali)
+      └─ NotificationService.ensureScheduled(...)  ← idempoten, self-healing
+          ├─ Jika semua 7 (atau N) ID 1..7 masih pending → no-op
+          └─ Jika tidak lengkap → scheduleReminders(...)
+              └─ canScheduleExactAlarms() → exact vs inexact mode
+                  ├─ exactAllowWhileIdle (Android 12+ izin diberikan)
+                  └─ inexactAllowWhileIdle (fallback bila ditolak)
               └─ Untuk setiap hari yang aktif:
-                  ├─ AndroidNotificationDetails(channelId, channelName)
-                  └─ zonedSchedule(id, title, body, scheduledDate, details)
-                      └─ scheduledDate = TZDateTime untuk hari berikutnya yang cocok + jam yang diset
+                  └─ zonedSchedule(id, title, body, scheduledDate, details,
+                                   matchDateTimeComponents: dayOfWeekAndTime)
+              └─ Mengembalikan ScheduleResult(scheduledCount, exactAlarmDenied, ...)
 ```
 
-**Mengubah Jadwal:**
-`SettingsScreen` → ubah jam/hari → `NotificationService.cancelAll()` → `NotificationService.scheduleReminders(newHour, newMinute, newWeekdays)`
+### Mode Penjadwalan
 
-**Izin Notifikasi:**
-- Android 13+: `POST_NOTIFICATIONS` diminta di halaman 3 Onboarding
-- iOS: izin juga diminta di OnboardingScreen via `flutter_local_notifications.requestPermissions()`
+| Mode | Kondisi | Ketepatan Waktu |
+|---|---|---|
+| `exactAllowWhileIdle` | Default; izin SCHEDULE_EXACT_ALARM diberikan | Tepat menit |
+| `inexactAllowWhileIdle` | Fallback otomatis bila izin exact ditolak | Bisa meleset 1–15 menit |
+
+UI menampilkan snackbar khusus (`AppStrings.notifInexactFallback`) ketika
+fallback inexact aktif sehingga pengguna tahu cara mengaktifkan akurasi penuh
+(Settings perangkat → Apps → SakuRapi → Alarms & reminders → Allow).
+
+### Reboot & Update Aplikasi
+
+`AndroidManifest.xml` mendaftarkan
+`com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver`
+yang men-listen `BOOT_COMPLETED`, `LOCKED_BOOT_COMPLETED`, dan
+`MY_PACKAGE_REPLACED`. Plugin `flutter_local_notifications` otomatis
+menjadwalkan ulang seluruh notifikasi yang tersimpan di SharedPreferences
+internal-nya saat receiver tersebut dipicu.
+
+Selain itu, `_initBackground` di `main.dart` memanggil `ensureScheduled`
+setiap aplikasi dibuka — sehingga sekalipun OS membersihkan jadwal, hal
+itu otomatis di-recover saat user buka aplikasi.
+
+### Mengubah Jadwal
+
+`SettingsScreen` → ubah jam atau hari →
+`NotificationToggleNotifier.reschedule()` → `cancelAllReminders` +
+`scheduleReminders` → emit `ReminderActionResult` ke UI untuk snackbar
+yang akurat (granted / denied / inexact fallback).
+
+### Izin Notifikasi
+
+- Android 13+: `POST_NOTIFICATIONS` diminta saat user pertama kali enable
+  reminder atau di halaman 3 Onboarding
+- Android 12+: `SCHEDULE_EXACT_ALARM` diminta opsional — bila ditolak,
+  service fallback ke inexact mode (lihat tabel di atas)
+- iOS: izin diminta lewat `requestPermissions(alert: true, badge: true, sound: true)`
+
+### Batasan Reliabilitas — JUJUR
+
+| Skenario | Notifikasi muncul? | Catatan |
+|---|---|---|
+| Aplikasi tertutup biasa | ✅ Ya | AlarmManager dikelola sistem |
+| Setelah reboot perangkat | ✅ Ya | BootReceiver auto-reschedule |
+| Setelah update aplikasi | ✅ Ya | MY_PACKAGE_REPLACED auto-reschedule |
+| App di-force-stop dari Settings | ❌ Tidak (hingga app dibuka lagi) | Android menonaktifkan alarm sampai user membuka app |
+| OEM agresif (Xiaomi MIUI, Huawei, Oppo) | ⚠️ Kadang | Pengguna perlu mengaktifkan "Autostart" + "No restrictions on battery" |
+| Doze mode aktif | ✅ Ya | `exactAllowWhileIdle` melewati doze (jika izin diberikan) |
+| Channel dimute oleh user | ❌ Tidak | Dikontrol pengguna lewat Android Settings; aplikasi tidak bisa override |
+
+**Self-healing:** `ensureScheduled` saat startup memastikan jadwal lengkap
+sehingga sebagian besar drift bisa pulih sendiri tanpa interaksi pengguna.
 
 ---
 

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'core/constants/app_strings.dart';
+import 'core/services/background_sync_coordinator.dart';
 import 'core/theme/app_theme.dart';
 import 'domain/entities/user_entity.dart';
 import 'presentation/providers/auth_provider.dart';
@@ -15,9 +16,11 @@ import 'router/app_router.dart';
 /// Dibuat di dalam [UncontrolledProviderScope] (lihat main.dart) agar semua
 /// Riverpod provider dapat diakses di seluruh widget tree.
 ///
-/// [MaterialApp.router.builder] membungkus setiap halaman dengan
-/// [_EmailLinkHandler] yang menangkap URI deep link email sign-in dan
-/// menyelesaikan proses autentikasi secara otomatis.
+/// [MaterialApp.router.builder] membungkus setiap halaman dengan tiga handler
+/// transparan:
+///   1. [_BackgroundSyncHandler] — mengelola Timer periodic + lifecycle resume sync
+///   2. [_RealtimeSyncHandler]   — mulai/hentikan listener Firestore berdasarkan auth
+///   3. [_EmailLinkHandler]      — selesaikan sign-in email saat URI deep link masuk
 class App extends ConsumerWidget {
   const App({super.key});
 
@@ -40,11 +43,11 @@ class App extends ConsumerWidget {
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
-      // Dua handler transparan membungkus semua halaman:
-      // 1. _RealtimeSyncHandler — mulai/hentikan listener Firestore berdasarkan auth state
-      // 2. _EmailLinkHandler   — selesaikan sign-in email saat URI deep link masuk
-      builder: (context, child) =>
-          _RealtimeSyncHandler(child: _EmailLinkHandler(child: child!)),
+      builder: (context, child) => _BackgroundSyncHandler(
+        child: _RealtimeSyncHandler(
+          child: _EmailLinkHandler(child: child!),
+        ),
+      ),
     );
   }
 }
@@ -147,4 +150,51 @@ class _RealtimeSyncHandlerState extends ConsumerState<_RealtimeSyncHandler> {
 
     return widget.child;
   }
+}
+
+// ── Background Sync Handler ───────────────────────────────────────────────────
+
+/// Mengelola siklus hidup [BackgroundSyncCoordinator].
+///
+/// Coordinator dimulai saat widget pertama kali di-mount dan dihentikan
+/// saat dispose. Ini memastikan timer periodik + listener lifecycle aktif
+/// selama aplikasi terbuka, dan dibersihkan saat aplikasi ditutup.
+///
+/// **Mengapa di sini, bukan di Provider?** Coordinator menyentuh
+/// `WidgetsBindingObserver` (siklus hidup widget) sehingga tempat paling
+/// alami untuk mengikatnya adalah State widget. Ini juga mencegah import
+/// siklik antara `database_provider.dart` dan `auth_provider.dart`.
+class _BackgroundSyncHandler extends ConsumerStatefulWidget {
+  const _BackgroundSyncHandler({required this.child});
+  final Widget child;
+
+  @override
+  ConsumerState<_BackgroundSyncHandler> createState() =>
+      _BackgroundSyncHandlerState();
+}
+
+class _BackgroundSyncHandlerState
+    extends ConsumerState<_BackgroundSyncHandler> {
+  late final BackgroundSyncCoordinator _coordinator;
+
+  @override
+  void initState() {
+    super.initState();
+    _coordinator = BackgroundSyncCoordinator((trigger) async {
+      // Pakai ref dari ConsumerState — aman dipanggil dari closure.
+      await ref
+          .read(currentUserProvider.notifier)
+          .runFullSync(trigger: trigger);
+    });
+    _coordinator.start();
+  }
+
+  @override
+  void dispose() {
+    _coordinator.stop();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }

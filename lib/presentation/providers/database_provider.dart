@@ -118,6 +118,7 @@ final realtimeSyncServiceProvider = Provider<RealtimeSyncService>((ref) {
   return service;
 });
 
+
 // ── Repositories ─────────────────────────────────────────────────────────────
 
 final settingsRepositoryProvider = Provider<ISettingsRepository>(

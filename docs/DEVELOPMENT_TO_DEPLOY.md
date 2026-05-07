@@ -785,8 +785,25 @@ flutter run -d chrome --web-hostname localhost --web-port 7357
 - [ ] Ekspor CSV: file terbuka dan dapat dibaca
 - [ ] Impor CSV: data masuk dengan benar
 - [ ] Notifikasi: aktifkan, tunggu waktu yang ditentukan (atau ubah ke 1 menit dari sekarang untuk test)
+- [ ] Notifikasi: pastikan muncul setelah reboot perangkat
+- [ ] Notifikasi: tolak izin SCHEDULE_EXACT_ALARM (Android 12+) → pastikan snackbar fallback muncul
 - [ ] Settings: simpan payday date, berubah di laporan siklus gajian
 - [ ] Logout: kembali ke login screen, sesi bersih
+- [ ] Logout: pastikan snackbar "Menyinkronkan data terakhir..." muncul
+
+### Sinkronisasi & Restore (FIX di v1.1)
+
+- [ ] Login Google di perangkat A, tambah beberapa transaksi → cek di Firestore Console: data ada
+- [ ] Login Google dengan akun yang sama di perangkat B baru → tunggu banner "Sedang memulihkan..."
+      hilang → semua transaksi & kategori muncul di UI
+- [ ] **Re-login (kasus utama)**: kill aplikasi sepenuhnya → buka lagi → tanpa logout/login,
+      data harus muncul utuh tanpa kosong
+- [ ] Logout aman: tekan Keluar saat online → snackbar "Data terakhir berhasil disinkronkan"
+- [ ] Logout aman: tekan Keluar saat offline → snackbar "Sinkronisasi tidak selesai..." → login lagi → data tetap ada
+- [ ] Sync periodik: buka aplikasi → tambah transaksi di perangkat lain → tunggu 1 menit
+      atau resume aplikasi → cek transaksi muncul tanpa restart
+- [ ] Sync 22:00: ubah jam sistem ke 21:59 → tunggu 1 menit dengan aplikasi terbuka →
+      cek log dev untuk pesan "[scheduled-22:00]"
 
 ### Firebase — Android
 
